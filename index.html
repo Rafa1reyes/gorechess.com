@@ -591,8 +591,8 @@
     </ul>
     <div class="nuke-price">$100.00<small>USD · UNLOCKS BOT NUKES + 1 CHARGE</small></div>
     <div class="nuke-owned" id="store-owned"></div>
-    <button class="go" id="store-buy" disabled>OPENING SOON</button>
-    <div class="nuke-demo">🛠 <b>The armoury isn't open yet.</b> Payments are wired up but not yet verified end to end, so nothing is for sale today — we're not taking money for something we haven't watched arrive. Everything else in the game works. Check back shortly.</div>
+    <button class="go" id="store-buy">PURCHASE — $100</button>
+    <div class="nuke-demo">Secure checkout by <b>Stripe</b> — we never see your card details. The warhead is credited to your account once payment clears, usually within a minute. Questions or trouble: <b>spindola.software@gmail.com</b></div>
     <button class="linkish" data-close>close</button>
   </div>
 </div>
@@ -805,8 +805,19 @@ function makeSupabaseBackend(){
         if(error) throw error;
         session = data.session;
       }
-      const {data:rows, error} = await sb.rpc('gc_ensure_player');
-      if(error) throw error;
+      let {data:rows, error} = await sb.rpc('gc_ensure_player');
+      if(error){
+        /* A stored session can outlive its user (deleted account, wiped
+           project). Don't let that drop us to offline mode with a stale
+           cached profile — throw the session away and start clean once. */
+        console.warn('stale session, signing in fresh:', error.message);
+        try{ await sb.auth.signOut(); }catch(e){}
+        const {data:d2, error:e2} = await sb.auth.signInAnonymously();
+        if(e2) throw e2;
+        session = d2.session;
+        ({data:rows, error} = await sb.rpc('gc_ensure_player'));
+        if(error) throw error;
+      }
       const r = Array.isArray(rows) ? rows[0] : rows;
       return {
         id: session.user.id, anonymous: !!session.user.is_anonymous,
@@ -2481,17 +2492,47 @@ $('#store-buy').onclick = async function(){
   sfx.ui();
   const label = this.textContent;
   this.disabled = true;
-  this.textContent = 'AUTHORISING…';
-  const res = await Backend.purchaseNuke();
+  this.textContent = 'WAITING FOR PAYMENT…';
+  $('#store-owned').textContent = 'Finish checkout in the tab that just opened. This window will update by itself.';
+
+  let res;
+  try{ res = await Backend.purchaseNuke(); }
+  catch(e){ console.error(e); res = {ok:false, reason:'error'}; }
+
   this.disabled = false;
   this.textContent = label;
-  if(!res.ok){ toast('Payment declined. No warhead for you.'); return; }
+
+  if(!res.ok){
+    /* Never say "declined" on a timeout. The player may well have paid — the
+       warhead is credited by a webhook, and a slow or failed webhook is not a
+       failed payment. Telling a paying customer their card was declined is
+       both false and the fastest way to earn a chargeback. */
+    if(res.reason === 'popup blocked'){
+      toast('Your browser blocked the checkout window. Allow pop-ups and try again.');
+    } else if(res.reason === 'timeout'){
+      storeNotice(
+        'If you completed the payment, it went through — the warhead just has not landed yet. ' +
+        'It usually appears within a minute; reopen this page to check. If it still is not here, ' +
+        'email spindola.software@gmail.com with your receipt and we will sort it out.');
+      toast('Payment not confirmed yet — see the note above.');
+    } else {
+      toast('Could not start checkout. Nothing was charged.');
+    }
+    refreshStore(); return;
+  }
+
   P.nukes = res.nukes;              // the balance the backend believes in
   P.nukeUnlocked = res.unlocked !== false;
   sfx.promote();
   toast('☢️ Armed. Unlimited bot nukes, plus one charge for a live opponent.');
   refreshStore(); refreshHome(); updateNukeUI();
 };
+
+/* a persistent line in the store modal, for things a toast is too brief for */
+function storeNotice(msg){
+  const el = $('#store-owned');
+  el.innerHTML = `<span style="color:var(--gold)">${msg}</span>`;
+}
 $('#btn-nuke').onclick = ()=>{
   if(!G || G.over) return;
   if(G.busy){ nudgeTurn(); return; }     // something is already dying on screen
@@ -2694,9 +2735,14 @@ if(typeof Chess === 'undefined'){
     if(!acct){
       Backend = Local;
       acct = await Local.signIn();
-      ONLINE = false;
     }
     ONLINE = Backend !== Local;
+
+    /* Entitlements are a server fact, not a cached one. Offline play is fine;
+       offline WARHEADS are not — otherwise blocking one CDN request would hand
+       out unlimited nukes from whatever the last cached profile happened to
+       say. The server restores the real balance on the next successful load. */
+    if(!ONLINE){ P.nukes = 0; P.nukeUnlocked = false; }
 
     /* The server is the source of truth for rating, record and entitlements.
        Anything it returns overwrites the local cache; a stale localStorage
