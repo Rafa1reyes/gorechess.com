@@ -283,6 +283,26 @@
   .nuke-owned b{color:var(--gold); font-style:normal;}
   #store-buy{border-color:#8a5a12; background:linear-gradient(180deg,#6b430a,#31200a); color:#ffe9b0;}
   #store-buy:disabled{opacity:.55; cursor:default;}
+
+  /* ---------- ACCOUNT SECURITY ---------- */
+  .acct-warn{display:none; text-align:left; font-size:12.5px; line-height:1.55; color:#e6c98c;
+    background:#2a1d08; border:1px solid #7a5510; border-radius:9px; padding:10px 12px; margin:12px 0;}
+  .acct-warn.on{display:block;}
+  .acct-warn b{display:block; color:var(--gold); margin-bottom:3px; letter-spacing:.5px;}
+  .acct-state{font-size:13.5px; line-height:1.5; margin:10px 0 12px; color:var(--dim);}
+  .acct-state b{color:var(--bone); font-style:normal;}
+  .acct-state.good{color:#8fd394;}
+  .acct-state.good b{color:#c7f0c9;}
+  #acct-email{width:100%; padding:12px 14px; border-radius:10px; border:1px solid #46303a;
+    background:#1b1218; color:var(--bone); font-size:16px; font-family:inherit; text-align:center;}
+  #acct-email:focus{outline:none; border-color:var(--blood2);}
+  #acct-go[disabled]{opacity:.55; cursor:default;}
+  /* the pill on the home screen that nags until the account is recoverable */
+  #home-secure{display:none; margin:10px auto 0; font-size:12.5px; letter-spacing:.3px;
+    color:#e6c98c; background:#2a1d08; border:1px solid #7a5510; border-radius:999px;
+    padding:7px 15px;}
+  #home-secure.on{display:inline-block;}
+  #home-secure:hover{border-color:var(--gold); color:#fff6da;}
   /* ---------- IDENTITY ---------- */
   .me-name{display:flex; align-items:center; gap:7px; font-size:17px; color:var(--bone); font-weight:bold;}
   .me-name .name-edit{background:none; border:none; font-size:13px; opacity:.5; padding:2px 4px;}
@@ -396,6 +416,7 @@
     <button class="mbtn" id="btn-stats"><span class="ic">🏆</span><span><b>Career &amp; Leagues</b><span class="d">Your rating, league ladder, and body count.</span></span></button>
     <button class="mbtn" id="btn-friends"><span class="ic">👥</span><span><b>Friends</b><span class="d">Add allies, answer requests, challenge them.</span></span><span class="mbtn-badge" id="friends-badge"></span></button>
     <button class="mbtn" id="btn-store"><span class="ic">☢️</span><span><b>Black Market</b><span class="d" id="store-teaser">Tactical nuke — $100. One shot, instant win, any match.</span></span></button>
+    <button id="home-secure">🔒 Secure your account — it only exists in this browser</button>
   </div>
 
   <div class="arsenal">
@@ -602,8 +623,36 @@
     </ul>
     <div class="nuke-price">$100.00<small>USD · UNLOCKS BOT NUKES + 1 CHARGE</small></div>
     <div class="nuke-owned" id="store-owned"></div>
+    <div class="acct-warn" id="store-warn">
+      <b>⚠ Secure your account first</b>
+      Right now this account exists only in this browser. Clearing your history,
+      using private browsing, or switching device would take the warhead with it —
+      and $100 is too much to leave sitting in browser storage. Add an email and
+      it's yours permanently, on any device.
+    </div>
     <button class="go" id="store-buy">PURCHASE — $100</button>
     <div class="nuke-demo">Secure checkout by <b>Stripe</b> — we never see your card details. The warhead is credited to your account once payment clears, usually within a minute. Questions or trouble: <b>spindola.software@gmail.com</b></div>
+    <button class="linkish" data-close>close</button>
+  </div>
+</div>
+
+<!-- Securing the account: an anonymous player lives in one browser's storage,
+     which is fine for a rating and unacceptable for a $100 warhead. -->
+<div class="overlay" id="ov-account">
+  <div class="modal">
+    <h2 id="acct-title">🔒 SECURE YOUR ACCOUNT</h2>
+    <p class="sub" id="acct-sub">Add an email so your warhead and rating can't be lost.</p>
+    <div class="acct-state" id="acct-state"></div>
+    <input id="acct-email" type="email" inputmode="email" autocomplete="email"
+           placeholder="you@example.com" spellcheck="false">
+    <div class="err" id="acct-err"></div>
+    <button class="go" id="acct-go">SEND ME THE LINK</button>
+    <div class="nuke-demo" id="acct-note">
+      We'll email you a one-tap link. No password to remember, and we never post
+      or share anything. Your account keeps everything it already has — same
+      rating, same record, same warheads.
+    </div>
+    <button class="linkish" id="acct-switch"></button>
     <button class="linkish" data-close>close</button>
   </div>
 </div>
@@ -795,6 +844,12 @@ const Local = {
   finishMatch(){ return Promise.resolve(null); },
   claimWin(){ return Promise.resolve(null); },
   watchMatch(){ return ()=>{}; },
+
+  /* Offline there is no account to secure and nothing is for sale, so the
+     honest answer is "not secured" rather than a reassuring lie. */
+  accountState(){ return Promise.resolve({signedIn:false, secured:false, email:null}); },
+  linkEmail(){ return Promise.reject(new Error('You appear to be offline. Reconnect and try again.')); },
+  restoreAccount(){ return Promise.reject(new Error('You appear to be offline. Reconnect and try again.')); },
 };
 
 /* =====================================================================
@@ -806,6 +861,14 @@ const Local = {
 const SUPABASE_URL  = 'https://oylpbdmrtskzrlchcvso.supabase.co';
 const SUPABASE_KEY  = 'sb_publishable_qJMFWpxtpEoj2lm-dM879w_ZTfLvqUN';
 const NUKE_PAY_LINK = 'https://buy.stripe.com/eVqcN5c8wdb5eWSa8S67S00';
+/* Where the confirmation / magic link drops the player back. Must also be on
+   the Supabase project's redirect allow-list, or Supabase silently sends them
+   to the project's Site URL instead — which is PoolTidy, not GoreChess. */
+const RETURN_URL = location.origin + location.pathname;
+/* Read before supabase-js strips the tokens out of the URL on start-up, so we
+   can tell "they just came back from the email" from an ordinary page load. */
+const CAME_FROM_LINK = /access_token=|[?&#]type=(signup|magiclink|email_change|recovery)/
+  .test(location.hash + location.search);
 
 function makeSupabaseBackend(){
   const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
@@ -986,6 +1049,40 @@ function makeSupabaseBackend(){
     /* Realtime is the accelerator, not the mechanism: it makes the opponent's
        move land instantly, and the poll behind it is what guarantees the game
        still finishes if the socket never connects. */
+    /* "Secured" means the email is confirmed, not merely typed. This project
+       has mailer_autoconfirm off, so an unconfirmed address is worth nothing
+       for recovery — treating a typo'd one as safe is exactly the false
+       comfort we're trying to avoid. */
+    async accountState(){
+      const {data:{user}} = await sb.auth.getUser();
+      if(!user) return {signedIn:false, secured:false, email:null};
+      return {
+        signedIn: true,
+        secured: !user.is_anonymous && !!user.email && !!user.email_confirmed_at,
+        email: user.email || null,
+        pending: user.new_email || null,
+      };
+    },
+
+    /* Upgrades the anonymous account in place. Supabase keeps the same user
+       id, so the entitlement row, rating and match history all carry over —
+       nothing is migrated and nothing can be dropped on the way. */
+    async linkEmail(email){
+      const {error} = await sb.auth.updateUser({email}, {emailRedirectTo: RETURN_URL});
+      if(error) throw error;
+      return {sent:true};
+    },
+
+    /* Same account, different browser. The magic link signs them back into
+       the very same user id, so the warhead is simply there again. */
+    async restoreAccount(email){
+      const {error} = await sb.auth.signInWithOtp({
+        email, options:{shouldCreateUser:false, emailRedirectTo: RETURN_URL},
+      });
+      if(error) throw error;
+      return {sent:true};
+    },
+
     watchMatch(matchId, onChange){
       const ch = sb.channel(`gcm:${matchId}`)
         .on('postgres_changes', {event:'INSERT', schema:'public', table:'gc_moves',
@@ -2658,10 +2755,134 @@ $('#btn-stats').onclick = ()=>{ sfx.ui(); refreshStats(); showScreen('#scr-stats
 $('#btn-stats-back').onclick = ()=>{ sfx.ui(); showScreen('#scr-home'); };
 $('#btn-friends').onclick = ()=>{ sfx.ui(); $('#friend-search').value=''; renderSearch(''); refreshFriends(); showScreen('#scr-friends'); };
 $('#btn-friends-back').onclick = ()=>{ sfx.ui(); showScreen('#scr-home'); };
-$('#btn-store').onclick = ()=>{ sfx.ui(); refreshStore(); openOv('#ov-store'); };
+$('#btn-store').onclick = ()=>{ sfx.ui(); refreshStore(); refreshAccount(); openOv('#ov-store'); };
+
+/* =====================================================================
+   ACCOUNT SECURITY
+
+   Anonymous play is the whole charm of the front door — nobody should have
+   to sign up to push a pawn. But an anonymous account lives entirely in one
+   browser's storage, and "clear browsing data" is a normal thing people do.
+   Losing a rating that way is annoying; losing a $100 warhead is somebody
+   emailing you about their money. So the account stays anonymous right up
+   until it is about to become valuable, and then it has to be recoverable.
+
+   Upgrading is done in place: Supabase keeps the same user id, so the
+   entitlement row, rating and history are untouched by it.
+===================================================================== */
+let ACCT = {signedIn:false, secured:false, email:null, mode:'link'};
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+async function refreshAccount(){
+  try{ Object.assign(ACCT, await Backend.accountState()); }
+  catch(e){ console.error('account state unavailable', e); }
+  $('#home-secure').classList.toggle('on', ONLINE && !ACCT.secured);
+  $('#store-warn').classList.toggle('on', !ACCT.secured);
+  return ACCT;
+}
+
+function paintAccount(){
+  const secured = !!ACCT.secured, restore = ACCT.mode === 'restore';
+  const st = $('#acct-state'), go = $('#acct-go');
+  $('#acct-err').textContent = '';
+  st.className = 'acct-state' + (secured ? ' good' : '');
+  $('#acct-email').style.display = secured ? 'none' : '';
+  go.style.display               = secured ? 'none' : '';
+  $('#acct-note').style.display  = secured ? 'none' : '';
+  $('#acct-switch').style.display = secured ? 'none' : '';
+  go.disabled = false;
+
+  if(secured){
+    $('#acct-title').textContent = '🔒 ACCOUNT SECURED';
+    $('#acct-sub').textContent   = 'Nothing here can be lost by clearing your browser.';
+    st.textContent = '';
+    const b = document.createElement('b');
+    b.textContent = ACCT.email || '';
+    st.append('Signed in as ', b, '. Open GoreChess anywhere, sign in with that '
+      + 'address, and your rating and warheads come with you.');
+    return;
+  }
+  if(restore){
+    $('#acct-title').textContent = '↩ RESTORE YOUR ACCOUNT';
+    $('#acct-sub').textContent   = 'Already secured one? Sign back into it.';
+    st.textContent = 'Enter the email you used. We\'ll send a one-tap link that '
+      + 'signs you back into the same account — same rating, same warheads.';
+    go.textContent = 'EMAIL ME A SIGN-IN LINK';
+    $('#acct-switch').textContent = 'Actually, secure this account instead';
+  } else {
+    $('#acct-title').textContent = '🔒 SECURE YOUR ACCOUNT';
+    $('#acct-sub').textContent   = 'So a cleared browser can never cost you a warhead.';
+    st.textContent = 'This account exists only in this browser right now. Add an '
+      + 'email and it becomes permanently yours — you keep the rating, record and '
+      + 'warheads you already have.';
+    go.textContent = 'SEND ME THE LINK';
+    $('#acct-switch').textContent = 'I already have an account — restore it';
+  }
+}
+
+function openAccount(mode){
+  ACCT.mode = mode === 'restore' ? 'restore' : 'link';
+  $('#acct-email').value = '';
+  paintAccount();
+  openOv('#ov-account');
+  if(!ACCT.secured) setTimeout(()=> $('#acct-email').focus(), 60);
+}
+
+$('#home-secure').onclick = ()=>{ sfx.ui(); openAccount('link'); };
+$('#acct-switch').onclick = ()=>{
+  sfx.ui();
+  ACCT.mode = ACCT.mode === 'restore' ? 'link' : 'restore';
+  paintAccount();
+};
+
+$('#acct-go').onclick = async function(){
+  const email = $('#acct-email').value.trim().toLowerCase();
+  const err = $('#acct-err');
+  if(!EMAIL_RE.test(email)){ err.textContent = 'That doesn\'t look like an email address.'; return; }
+  sfx.ui();
+  const label = this.textContent;
+  this.disabled = true; this.textContent = 'SENDING…'; err.textContent = '';
+  try{
+    if(ACCT.mode === 'restore') await Backend.restoreAccount(email);
+    else                        await Backend.linkEmail(email);
+    const st = $('#acct-state');
+    st.className = 'acct-state good';
+    st.textContent = `Check ${email} — the link is on its way. Open it on this `
+      + `device and you're done. Give it a minute, and look in spam if it's shy.`;
+    $('#acct-email').style.display = 'none';
+    $('#acct-switch').style.display = 'none';
+    this.style.display = 'none';
+  }catch(e){
+    console.error('account email failed', e);
+    const m = (e && e.message) || '';
+    err.textContent =
+      /not found|no user|signups not allowed/i.test(m)
+        ? 'No account with that email. If you\'ve never secured one, choose "secure this account" instead.'
+      : /already.*(registered|exists|taken)/i.test(m)
+        ? 'That email already belongs to an account — choose "restore it" to sign back in.'
+      : /rate|limit|seconds|after/i.test(m)
+        ? 'Too many emails just now. Wait a minute and try again.'
+      : (m || 'Could not send the email. Try again in a moment.');
+    this.disabled = false; this.textContent = label;
+  }
+};
 $('#store-buy').onclick = async function(){
   if(this.disabled) return;
   sfx.ui();
+
+  /* Do not sell a $100 item to an account that lives in one browser's
+     storage. The check is deliberately on a *confirmed* email — this project
+     has mailer_autoconfirm off, so an address that was typed but never
+     confirmed can't sign anyone back in, and treating it as safe would be
+     worse than not asking at all. */
+  const acct = await refreshAccount();
+  if(!acct.secured){
+    closeOv('#ov-store');
+    openAccount('link');
+    toast('Secure your account first — then the warhead is yours for good.');
+    return;
+  }
+
   const label = this.textContent;
   this.disabled = true;
   this.textContent = 'WAITING FOR PAYMENT…';
@@ -3106,6 +3327,14 @@ if(typeof Chess === 'undefined'){
     }
     P.id = acct.id;
     try{ localStorage.setItem('gorechess_profile', JSON.stringify(P)); }catch(e){}
+
+    /* Did they just come back from the confirmation / sign-in email? */
+    await refreshAccount();
+    if(CAME_FROM_LINK){
+      history.replaceState(null, '', RETURN_URL);   // don't leave tokens in the URL
+      if(ACCT.secured) toast('Account secured — your purchases are safe now.');
+      else toast('That link didn\'t complete. Try sending a fresh one.');
+    }
 
     // pick up a match that was interrupted by a refresh / closed tab
     try{
