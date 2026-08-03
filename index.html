@@ -858,8 +858,13 @@ const Local = {
    decided here. Rating is computed by gc_apply_result(); the nuke balance
    by gc_spend_nuke(); neither is writable by this client.
 ===================================================================== */
-const SUPABASE_URL  = 'https://oylpbdmrtskzrlchcvso.supabase.co';
-const SUPABASE_KEY  = 'sb_publishable_qJMFWpxtpEoj2lm-dM879w_ZTfLvqUN';
+/* GoreChess has its own Supabase project as of 2026-08-03. It used to share
+   PoolTidy's, but sender identity is project-wide, so every confirmation
+   email arrived from a pool-cleaning company — bad before a $100 purchase,
+   and a spam complaint against a game would have hurt PoolTidy's real
+   customers. Own project, own sender, own rate limits. */
+const SUPABASE_URL  = 'https://nfvtxanvofquxfkunqbl.supabase.co';
+const SUPABASE_KEY  = 'sb_publishable_GgkdotLzv1NakqXwyoKYiw_WIF-cwTZ';
 const NUKE_PAY_LINK = 'https://buy.stripe.com/eVqcN5c8wdb5eWSa8S67S00';
 /* Where the confirmation / magic link drops the player back. Must also be on
    the Supabase project's redirect allow-list, or Supabase silently sends them
