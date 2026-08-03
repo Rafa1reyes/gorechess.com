@@ -256,6 +256,16 @@
   #btn-nuke small{display:block; font-size:11.5px; letter-spacing:.4px; color:#c39a55; font-style:italic; margin-top:3px;}
   @keyframes nukeGlow{50%{box-shadow:0 0 0 1px #170f06, 0 6px 28px rgba(240,180,60,.48);}}
 
+  /* shown only when a live opponent has gone quiet long enough to time out */
+  #btn-claim{display:none; width:100%; padding:11px 16px; border-radius:11px; font-size:16px;
+    letter-spacing:1.4px; margin-bottom:8px; color:#cfe9cf; border:1px solid #2f6b34;
+    text-align:center; background:linear-gradient(180deg,#1d3a1f,#0f1f10);
+    box-shadow:0 0 0 1px #0b140c, 0 6px 18px rgba(60,160,70,.18);}
+  #btn-claim.on{display:block;}
+  #btn-claim:hover{border-color:#57a75e; color:#eafbea;}
+  #btn-claim small{display:block; font-size:11.5px; letter-spacing:.4px; color:#8fb894;
+    font-style:italic; margin-top:3px;}
+
   /* detonation whiteout — sits above the banner, inside the board */
   #nukeflash{position:absolute; inset:0; z-index:9; pointer-events:none; opacity:0; background:#fff;}
   #nukeflash.on{animation:nukeFlash 1.6s ease-out;}
@@ -435,6 +445,7 @@
       </div>
       <div class="pl-bar" id="bar-bottom"><span class="av"></span><span class="nm"></span><span class="rt"></span><span class="morgue"></span><span class="turnlamp"></span></div>
       <div id="nuke-bar">
+        <button id="btn-claim">🏳️ OPPONENT LEFT — CLAIM WIN<small>They haven't moved in over two minutes. Take the point.</small></button>
         <button id="btn-nuke">☢️ LAUNCH NUKE <span class="cnt" id="nuke-count">×1</span><small>Ends the match in your favour. One use — then it's gone.</small></button>
       </div>
     </div>
@@ -768,15 +779,22 @@ const Local = {
             draws:P.draws, kills:P.kills, bestLeague:P.bestLeague|0, delta};
   },
 
-  /* becomes: insert into gc_queue, then wait on a Realtime pairing.
-     With no queue to join nobody is ever found, so every search runs the
-     full countdown and falls back to a bot — see findLiveOpponent(). */
+  /* Offline there is no arena to search, so nobody is ever found and every
+     search runs the full countdown into a bot — see findLiveOpponent(). */
   findOpponent(signal){
     return new Promise(resolve=>{
       mmPair = opp => { mmPair = null; resolve(opp); };
       signal.addEventListener('abort', ()=>{ mmPair = null; resolve(null); }, {once:true});
     });
   },
+
+  /* A live match needs a server to relay through. Offline these are inert,
+     which is why offline play never enters 'live' mode in the first place. */
+  submitMove(){ return Promise.resolve(null); },
+  matchState(){ return Promise.resolve(null); },
+  finishMatch(){ return Promise.resolve(null); },
+  claimWin(){ return Promise.resolve(null); },
+  watchMatch(){ return ()=>{}; },
 };
 
 /* =====================================================================
@@ -893,43 +911,101 @@ function makeSupabaseBackend(){
               bestLeague:r.out_best_league, delta:r.out_delta};
     },
 
-    /* Joins the real queue. Nothing pairs players yet, so this resolves only
-       on abort and the 15s countdown falls through to a bot — which is the
-       honest outcome until the pairing service exists. */
+    /* Joins the queue and polls gc_find_match() until it comes back with an
+       opponent. Polling rather than waiting on a Realtime push, because the
+       RPC is the single point where pairing is serialised: whichever side
+       polls second is the one that creates the match, and the first side
+       collects it on its next tick. A dropped socket would otherwise strand
+       two players in a queue neither of them can see. */
     findOpponent(signal){
       return new Promise(async resolve=>{
         const {data:{user}} = await sb.auth.getUser();
         if(!user) return resolve(null);
-        mmPair = opp => { mmPair = null; cleanup(); resolve(opp); };
 
-        const {data:me} = await sb.from('gc_players').select('rating').eq('id', user.id).maybeSingle();
-        await sb.from('gc_queue').upsert({player_id:user.id, rating:me?.rating ?? 800});
-
-        const channel = sb.channel(`gcq:${user.id}`)
-          .on('postgres_changes', {event:'UPDATE', schema:'public', table:'gc_queue',
-              filter:`player_id=eq.${user.id}`}, async payload => {
-            const matchId = payload.new?.match_id;
-            if(!matchId) return;
-            const {data:m} = await sb.from('gc_matches').select('white, black').eq('id', matchId).maybeSingle();
-            if(!m) return;
-            const oppId = m.white === user.id ? m.black : m.white;
-            const {data:o} = await sb.from('gc_players')
-              .select('username, avatar, rating').eq('id', oppId).maybeSingle();
-            cleanup();
-            resolve(o ? {name:o.username, av:o.avatar, rating:o.rating, matchId,
-                         color:m.white === user.id ? 'w' : 'b'} : null);
-          }).subscribe();
-
-        const cleanup = async ()=>{
-          mmPair = null;
-          try{ sb.removeChannel(channel); }catch(e){}
+        let done = false;
+        const leave = async ()=>{
+          done = true; mmPair = null;
           try{ await sb.from('gc_queue').delete().eq('player_id', user.id); }catch(e){}
         };
-        signal.addEventListener('abort', async ()=>{ await cleanup(); resolve(null); }, {once:true});
+        mmPair = opp => { mmPair = null; done = true; leave(); resolve(opp); };
+        signal.addEventListener('abort', async ()=>{ await leave(); resolve(null); }, {once:true});
+
+        while(!done && !signal.aborted){
+          try{
+            const {data, error} = await sb.rpc('gc_find_match');
+            if(error) throw error;
+            const r = Array.isArray(data) ? data[0] : data;
+            if(r && r.out_match_id){
+              done = true; mmPair = null;
+              return resolve({name:r.out_opp_name, av:r.out_opp_avatar,
+                              rating:r.out_opp_rating, id:r.out_opp_id,
+                              matchId:r.out_match_id, color:r.out_color});
+            }
+          }catch(e){ console.error('pairing poll failed', e); }
+          await wait(1800);
+        }
+        if(!signal.aborted) resolve(null);
       });
+    },
+
+    /* The server decides whether this move is yours to make and whether it
+       is next; it will throw if either is wrong. It does not judge legality
+       — that is chess.js's job, on both ends. */
+    async submitMove(matchId, ply, uci, san, fen){
+      const {data, error} = await sb.rpc('gc_submit_move',
+        {p_match_id:matchId, p_ply:ply, p_uci:uci, p_san:san, p_fen:fen});
+      if(error) throw error;
+      return Array.isArray(data) ? data[0] : data;
+    },
+
+    /* One call per tick answers both questions: is the match over, and what
+       has the opponent played since ply N. */
+    async matchState(matchId, sincePly){
+      const {data, error} = await sb.rpc('gc_match_state',
+        {p_match_id:matchId, p_since_ply:sincePly|0});
+      if(error) throw error;
+      const r = Array.isArray(data) ? data[0] : data;
+      return r && {status:r.out_status, result:r.out_result, cause:r.out_cause,
+                   fen:r.out_fen, nukedBy:r.out_nuked_by,
+                   updatedAt:r.out_updated_at, moves:r.out_moves || []};
+    },
+
+    async finishMatch(matchId, result, cause){
+      const {data, error} = await sb.rpc('gc_finish_match',
+        {p_match_id:matchId, p_result:result, p_cause:cause});
+      if(error) throw error;
+      return liveOutcome(data);
+    },
+
+    async claimWin(matchId){
+      const {data, error} = await sb.rpc('gc_claim_win', {p_match_id:matchId});
+      if(error) throw error;
+      return liveOutcome(data);
+    },
+
+    /* Realtime is the accelerator, not the mechanism: it makes the opponent's
+       move land instantly, and the poll behind it is what guarantees the game
+       still finishes if the socket never connects. */
+    watchMatch(matchId, onChange){
+      const ch = sb.channel(`gcm:${matchId}`)
+        .on('postgres_changes', {event:'INSERT', schema:'public', table:'gc_moves',
+            filter:`match_id=eq.${matchId}`}, ()=> onChange())
+        .on('postgres_changes', {event:'UPDATE', schema:'public', table:'gc_matches',
+            filter:`id=eq.${matchId}`}, ()=> onChange())
+        .subscribe();
+      return ()=>{ try{ sb.removeChannel(ch); }catch(e){} };
     },
   };
   return B;
+}
+
+/* every live RPC that ends a match returns the caller's own outcome */
+function liveOutcome(d){
+  const r = Array.isArray(d) ? d[0] : d;
+  return r && {result:r.out_result, cause:r.out_cause, delta:r.out_delta,
+               rating:r.out_rating, games:r.out_games, wins:r.out_wins,
+               losses:r.out_losses, draws:r.out_draws, kills:r.out_kills,
+               bestLeague:r.out_best_league};
 }
 
 let Backend = Local;
@@ -1644,6 +1720,11 @@ async function doMove(mv, opt={}){
   if(G.busy || G.over) return null;
   const res = G.chess.move(mv);
   if(!res) return null;
+  /* Send a live move the instant chess.js accepts it, without waiting for
+     the execution animation — the opponent shouldn't sit through our gore.
+     The server enforces turn and order, so a rejection means we're out of
+     sync, and the fix is to resync rather than to retry this move. */
+  if(G.mode==='live' && G.matchId && !opt.remote) relaySend(res);
   G.busy = true;
   updateNukeUI();            // can't launch mid-execution
   clearHints();
@@ -1867,10 +1948,13 @@ function pickBotMove(level){
 }
 function setThinking(on){ $('#bar-top').classList.toggle('thinking', !!on); }
 function maybeBotMove(){
-  if(!G || G.over || G.mode==='local') return;
+  /* 'live' used to land here too, and a bot quietly played the part of the
+     opponent behind a longer delay. Now that a real one exists, the machine
+     must keep its hands off the board. */
+  if(!G || G.over || G.mode==='local' || G.mode==='live') return;
   if(G.chess.turn() === G.playerColor) return;
   const tok = gameToken;
-  const delay = G.mode==='live' ? rnd(1100, 4200) : rnd(650, 1600);
+  const delay = rnd(650, 1600);
   setThinking(true);
   setTimeout(()=>{
     if(tok !== gameToken || !G || G.over || G.busy) {
@@ -1915,12 +1999,19 @@ function paintGameChrome(){
 function startGame(opts){
   gameToken++;
   cancelDrag();
+  stopRelay();
+  /* 'live' without a match id has nobody on the other end and no relay to
+     drive it, so the board would simply freeze. That only happens via the
+     console test hook — let a bot stand in rather than hang. */
+  const mode = (opts.mode === 'live' && !opts.matchId) ? 'bot' : opts.mode;
   G = {
     chess: new Chess(),
-    mode: opts.mode,                       // 'bot' | 'live' | 'local'
+    mode,                                  // 'bot' | 'live' | 'local'
     playerColor: opts.playerColor || 'w',
     opp: opts.opp || null,                 // {name, av, rating, level}
-    rated: opts.mode !== 'local',
+    matchId: opts.matchId || null,         // set only for 'live'
+    plyBase: 0,                            // plies before this chess instance's history
+    rated: mode !== 'local',
     kills: 0, busy: false, over: false, sel: null, lastFrom: null, lastTo: null,
     pieces: new Map(),
   };
@@ -1937,7 +2028,9 @@ function startGame(opts){
   paintGameChrome();
   feed(G.mode==='local' ? 'Pass &amp; Play — unrated bloodbath. White moves first.'
        : `Match started vs <b>${G.opp.name}</b> (${G.opp.rating}). Rated. Good hunting.`, true);
+  if(G.mode==='live') feed(`You are <b>${G.playerColor==='w'?'White':'Black'}</b> — a real opponent is on the other side.`, true);
   saveGame();
+  startRelay();
   maybeBotMove();
 }
 
@@ -1947,6 +2040,7 @@ function saveGame(){
   try{
     localStorage.setItem('gorechess_game', JSON.stringify({
       v:1, mode:G.mode, playerColor:G.playerColor, opp:G.opp,
+      matchId:G.matchId || null, plies:livePly(),
       fen:G.chess.fen(), kills:G.kills,
       morgueB:$('#bar-bottom .morgue').innerHTML, morgueT:$('#bar-top .morgue').innerHTML,
       feed:$('#killfeed').innerHTML, lastFrom:G.lastFrom, lastTo:G.lastTo,
@@ -1962,6 +2056,7 @@ function restoreGame(s){
   cancelDrag();
   G = {
     chess, mode:s.mode, playerColor:s.playerColor||'w', opp:s.opp||null,
+    matchId:s.matchId||null, plyBase:s.plies|0,
     rated:s.mode!=='local', kills:s.kills||0, busy:false, over:false, sel:null,
     lastFrom:s.lastFrom||null, lastTo:s.lastTo||null, pieces:new Map(),
   };
@@ -1980,6 +2075,11 @@ function restoreGame(s){
   paintGameChrome();
   if(G.lastFrom && G.lastTo) markLast(G.lastFrom, G.lastTo);
   feed('↩ Resumed your match in progress.', true);
+  /* A live match survives a refresh: the relay picks up from the ply we
+     saved, so anything the opponent played while we were reloading lands
+     as soon as we reconnect. A quick reload costs nothing — they can only
+     claim the game after two full minutes of silence. */
+  startRelay();
   maybeBotMove();        // if it was the opponent's move when you left, they play now
   return true;
 }
@@ -2073,7 +2173,16 @@ async function launchNuke(){
   banner('☢');
   await wait(200);
 
-  /* shockwave — the enemy army comes apart in rings out from ground zero */
+  await nukeShockwave(loser);
+
+  G.busy = false;
+  endGame(false, true);
+}
+
+/* The enemy army comes apart in rings out from ground zero. Extracted so
+   the player on the receiving end of a live nuke watches their own army
+   die too, rather than being told they lost over a full board. */
+async function nukeShockwave(loser){
   const doomed = [];
   G.chess.board().forEach(row => row.forEach(q=>{
     if(q && q.color === loser) doomed.push({sq:q.square, type:q.type});
@@ -2103,28 +2212,69 @@ async function launchNuke(){
   banner('TOTAL ANNIHILATION');
   feed(`☢ <b>${doomed.length} pieces vaporised.</b> Nothing left to bury.`, true);
   await wait(950);
-
-  G.busy = false;
-  endGame(false, true);
+  return doomed.length;
 }
+
+/* Someone spent $100 on you. The strike is already final on the server —
+   this is the part where you get to watch it land. */
+async function remoteNukeHit(){
+  G.busy = true;
+  updateNukeUI();
+  feed('☢ <b>INBOUND WARHEAD.</b> Detected too late.', true);
+  banner('INCOMING');
+  for(let i=0;i<3;i++) tone({f0:520, f1:300, dur:.4, type:'sawtooth', vol:.15, delay:i*.42});
+  await wait(1100);
+  banner('BRACE');
+  sfx.rocket();
+  await FX.rocket(256 + rnd(-90,90), -90, 256, 256, 820);
+  sfx.boom(); sfx.mate();
+  FX.shake = 36;
+  redFlash();
+  const fl = $('#nukeflash');
+  fl.classList.remove('on'); void fl.offsetWidth; fl.classList.add('on');
+  FX.fire(256, 256, 80); FX.smoke(256, 256, 50, .6); FX.blood(256, 256, 40, 6);
+  stainScorch(256, 256);
+  banner('☢');
+  await wait(200);
+  await nukeShockwave(G.playerColor);     // this time the ashes are yours
+  G.busy = false;
+}
+
+const CAUSE_TEXT = {
+  resign:'by resignation', checkmate:'by checkmate', stalemate:'by stalemate',
+  material:'insufficient material', repetition:'threefold repetition',
+  fifty:'50-move rule', nuke:'by tactical nuke ☢',
+  abandoned:'opponent left the arena',
+};
 
 async function endGame(resigned=false, nuked=false){
   if(G.over) return;
   G.over = true;
   gameToken++;
+  stopRelay();
   clearSavedGame();          // finished games shouldn't resume on refresh
   setTurnLamps();
   updateNukeUI();            // no launching a warhead into a finished match
   const ch = G.chess;
+  const sv = G.serverEnd || null;
 
-  let winner = null, cause = '';
-  if(nuked){ winner = G.nukeWinner; cause = 'by tactical nuke ☢'; }
-  else if(resigned){ winner = G.mode==='local' ? (ch.turn()==='w'?'b':'w') : (G.playerColor==='w'?'b':'w'); cause = 'by resignation'; }
-  else if(ch.in_checkmate()){ winner = ch.turn()==='w' ? 'b' : 'w'; cause = 'by checkmate'; }
-  else if(ch.in_stalemate()) cause = 'by stalemate';
-  else if(ch.insufficient_material()) cause = 'insufficient material';
-  else if(ch.in_threefold_repetition()) cause = 'threefold repetition';
-  else cause = '50-move rule';
+  let winner = null, causeCode = '';
+  if(sv){
+    /* The match was decided somewhere other than this board — they resigned,
+       they gave up waiting, or they nuked us. The server's verdict is the
+       whole story; nothing here gets a vote. */
+    winner = sv.result === 'd' ? null : sv.result;
+    causeCode = sv.cause || 'resign';
+    nuked = causeCode === 'nuke';
+  }
+  else if(nuked){ winner = G.nukeWinner; causeCode = 'nuke'; }
+  else if(resigned){ winner = G.mode==='local' ? (ch.turn()==='w'?'b':'w') : (G.playerColor==='w'?'b':'w'); causeCode = 'resign'; }
+  else if(ch.in_checkmate()){ winner = ch.turn()==='w' ? 'b' : 'w'; causeCode = 'checkmate'; }
+  else if(ch.in_stalemate()) causeCode = 'stalemate';
+  else if(ch.insufficient_material()) causeCode = 'material';
+  else if(ch.in_threefold_repetition()) causeCode = 'repetition';
+  else causeCode = 'fifty';
+  let cause = CAUSE_TEXT[causeCode] || causeCode;
 
   // dramatic finale: losing king dies on the board (a nuke already did that job)
   if(winner && nuked){
@@ -2133,7 +2283,9 @@ async function endGame(resigned=false, nuked=false){
     const loserKingSq = findKing(winner==='w' ? 'b' : 'w');
     const kEl = loserKingSq && G.pieces.get(loserKingSq);
     sfx.mate();
-    banner(resigned ? 'SURRENDER' : (ch.in_checkmate() ? 'CHECKMATE' : 'GAME OVER'));
+    banner(causeCode==='resign'    ? 'SURRENDER'
+         : causeCode==='abandoned' ? 'WALKOVER'
+         : causeCode==='checkmate' ? 'CHECKMATE' : 'GAME OVER');
     FX.shake = 10;
     if(kEl){
       const c = ctr(loserKingSq);
@@ -2154,9 +2306,12 @@ async function endGame(resigned=false, nuked=false){
   if(nuked && G.mode!=='local'){
     /* A bought win never moves a rating, never counts as a game, and never
        adds to the career body count — otherwise unlimited bot nukes would be
-       an unlimited kill farm. */
-    goRes.className = 'win';
-    goRes.textContent = 'VICTORY';
+       an unlimited kill farm. Note the player on the *receiving* end of a
+       live nuke arrives here too, and they have not won anything. */
+    const mine = winner === G.playerColor;
+    goRes.className = mine ? 'win' : 'loss';
+    goRes.textContent = mine ? 'VICTORY' : 'ANNIHILATED';
+    if(mine) sfx.win(); else sfx.lose();
     $('#go-rating-row').style.display = 'none';
     $('#go-league').style.display = 'none';
     $('#go-promo').style.display = 'none';
@@ -2168,20 +2323,33 @@ async function endGame(resigned=false, nuked=false){
   } else {
     $('#go-rating-row').style.display='';
     $('#go-league').style.display='';
-    if(!winner){ score=.5; goRes.className='draw'; goRes.textContent='DRAW'; }
-    else if(winner===G.playerColor){ score=1; goRes.className='win'; goRes.textContent='VICTORY'; sfx.win(); }
-    else { score=0; goRes.className='loss'; goRes.textContent='DEFEAT'; sfx.lose(); }
 
     const oldR = P.rating;
     const myKills = [...$('#bar-bottom .morgue').children].length;   // only your own
     const oldLeague = P.bestLeague|0;
+    const scoreOf = w => w == null ? .5 : (w === G.playerColor ? 1 : 0);
+    score = scoreOf(winner);
 
     /* The server owns the arithmetic. If it can't be reached the match still
        resolves on screen — we just don't invent a rating change. */
     let res = null;
     try{
-      res = await Backend.applyResult({score, oppRating:G.opp.rating, kills:myKills, oppName:G.opp.name});
-      Object.assign(P, {
+      if(G.mode === 'live' && G.matchId){
+        /* Both players report the same match, so finishing is idempotent:
+           the first call does the arithmetic and the second reads it back.
+           The server's verdict outranks ours — a resignation is always
+           scored against whoever sent it, so claiming otherwise achieves
+           nothing. */
+        res = await Backend.finishMatch(G.matchId, winner || 'd', causeCode);
+        if(res && res.result){
+          winner = res.result === 'd' ? null : res.result;
+          cause  = CAUSE_TEXT[res.cause] || res.cause || cause;
+          score  = scoreOf(winner);
+        }
+      } else {
+        res = await Backend.applyResult({score, oppRating:G.opp.rating, kills:myKills, oppName:G.opp.name});
+      }
+      if(res) Object.assign(P, {
         rating:res.rating, games:res.games, wins:res.wins, losses:res.losses,
         draws:res.draws, kills:res.kills, bestLeague:res.bestLeague,
       });
@@ -2189,6 +2357,10 @@ async function endGame(resigned=false, nuked=false){
       console.error('could not record result', e);
       toast('Offline — this result was not recorded.');
     }
+
+    if(!winner){ goRes.className='draw'; goRes.textContent='DRAW'; }
+    else if(winner===G.playerColor){ goRes.className='win'; goRes.textContent='VICTORY'; sfx.win(); }
+    else { goRes.className='loss'; goRes.textContent='DEFEAT'; sfx.lose(); }
 
     const d = res ? res.delta : 0;
     P.hist.unshift({o:G.opp.name, or:G.opp.rating, res:score===1?'W':score===0?'L':'D', d});
@@ -2615,7 +2787,11 @@ async function presentMatch(signal, opp, mode, headline, note){
   await wait(mode === 'live' ? 1600 : 2400);   // longer, so the bot notice is readable
   if(signal.aborted) return;                   // this search was superseded or cancelled
   closeOv('#ov-mm');
-  startGame({mode, playerColor: Math.random()<.5?'w':'b', opp});
+  /* In a live match the colours aren't ours to choose — the server assigned
+     them when it created the match, and the other player is already sitting
+     on the opposite side of the board. */
+  startGame({mode, opp, matchId: opp.matchId || null,
+             playerColor: opp.color || (Math.random()<.5 ? 'w' : 'b')});
 }
 
 async function runMatchmaking(){
@@ -2655,6 +2831,159 @@ async function runMatchmaking(){
 $('#btn-live').onclick = ()=>{ sfx.ui(); runMatchmaking(); };
 $('#mm-cancel').onclick = ()=>{ sfx.ui(); if(mmAbort) mmAbort.abort(); closeOv('#ov-mm'); };
 
+/* =====================================================================
+   LIVE RELAY — the other half of a real 1v1 match.
+
+   Realtime is the accelerator and the poll is the guarantee. A dropped
+   socket, a backgrounded tab or a phone that slept must not be able to
+   strand a match forever, so every two seconds we ask the server the
+   only two questions that matter: is this game over, and what has my
+   opponent played since I last looked.
+===================================================================== */
+let relay = null;
+
+/* How many half-moves this match has seen. Restoring from a saved FEN
+   leaves chess.js with an empty history, so the plies played before the
+   reload are carried separately — otherwise the relay would think the
+   match had just started and replay the whole game onto a live board. */
+const livePly = () => (G ? (G.plyBase|0) + G.chess.history().length : 0);
+
+function stopRelay(){
+  if(!relay) return;
+  clearInterval(relay.timer);
+  try{ relay.unwatch && relay.unwatch(); }catch(e){}
+  relay = null;
+  const b = $('#btn-claim'); if(b) b.classList.remove('on');
+}
+
+function startRelay(){
+  stopRelay();
+  if(!G || G.mode !== 'live' || !G.matchId) return;
+  relay = {
+    matchId: G.matchId, busy: false, timer: null, unwatch: null,
+    applied: livePly(),                     // plies already on our board
+  };
+  relay.timer = setInterval(()=> relayTick(), 2000);
+  try{ relay.unwatch = Backend.watchMatch(relay.matchId, ()=> relayTick()); }
+  catch(e){ console.warn('realtime unavailable, polling only', e); }
+  relayTick();
+}
+
+/* Fire-and-forget: the move is already on our board, and the server is the
+   one that decides whether it was ours to make. */
+function relaySend(res){
+  const matchId = G.matchId;
+  const ply = livePly() - 1;
+  const uci = res.from + res.to + (res.promotion || '');
+  const fen = G.chess.fen();
+  if(relay) relay.applied = Math.max(relay.applied, ply + 1);
+  Backend.submitMove(matchId, ply, uci, res.san, fen).catch(e=>{
+    console.error('server rejected our move', e);
+    toast('Out of sync with your opponent — resyncing.');
+    resyncFromServer();
+  });
+}
+
+/* Turn order is enforced server-side, so a rejected move means our board
+   has genuinely drifted from the match. Rather than guess at which moves
+   to replay, throw our position away and rebuild from the server's. */
+async function resyncFromServer(){
+  if(!G || G.mode !== 'live' || !G.matchId) return;
+  const matchId = G.matchId;
+  try{
+    const st = await Backend.matchState(matchId, 0);
+    if(!st || !G || G.over || G.matchId !== matchId) return;
+    if(st.status !== 'active') return concludeFromServer(st);
+    const ch = new Chess();
+    if(!st.fen || !ch.load(st.fen)) return;
+    G.chess = ch;
+    G.plyBase = (st.moves || []).length;   // the FEN already includes them all
+    G.busy = false; G.sel = null;
+    cancelDrag(); clearHints();
+    paintGameChrome();
+    if(relay) relay.applied = livePly();
+    saveGame();
+    feed('↻ Resynced with the server.', true);
+  }catch(e){ console.error('resync failed', e); }
+}
+
+async function relayTick(){
+  if(!relay || !G || G.over || G.matchId !== relay.matchId || relay.busy) return;
+  relay.busy = true;
+  const matchId = relay.matchId;
+  try{
+    const st = await Backend.matchState(matchId, relay.applied);
+    if(!st || !relay || relay.matchId !== matchId || !G || G.over) return;
+
+    for(const m of st.moves){
+      if(m.ply < relay.applied) continue;
+      if(m.by === P.id){ relay.applied = m.ply + 1; continue; }   // our own, echoed back
+      await applyRemoteMove(m);
+      relay.applied = m.ply + 1;
+      if(!G || G.over) return;
+    }
+
+    if(st.status !== 'active') return concludeFromServer(st);
+    updateClaimButton(st);
+  }catch(e){
+    console.error('relay tick failed', e);
+  }finally{
+    if(relay) relay.busy = false;
+  }
+}
+
+async function applyRemoteMove(m){
+  const from = m.uci.slice(0,2), to = m.uci.slice(2,4);
+  const promotion = m.uci.length > 4 ? m.uci[4] : undefined;
+  /* The server never judged legality, so this is where it gets judged. If
+     our own chess.js won't take the move, the opponent is either desynced
+     or running a modified client — either way it does not touch the board. */
+  const legal = G.chess.moves({verbose:true}).some(x =>
+    x.from === from && x.to === to && (!promotion || x.promotion === promotion));
+  if(!legal){
+    console.warn('refused illegal move from opponent:', m.uci);
+    return;
+  }
+  for(let i = 0; G.busy && i < 80; i++) await wait(100);   // let our own animation finish
+  if(!G || G.over) return;
+  await doMove({from, to, promotion}, {remote:true});
+}
+
+/* The match ended somewhere other than this board: they resigned, they gave
+   up waiting on us, or they spent $100 on a warhead. */
+async function concludeFromServer(st){
+  if(!G || G.over) return;
+  stopRelay();
+  G.serverEnd = st;
+  if(st.cause === 'nuke' && st.nukedBy && st.nukedBy !== P.id) await remoteNukeHit();
+  endGame();
+}
+
+function updateClaimButton(st){
+  const b = $('#btn-claim');
+  if(!b) return;
+  const idleMs = st ? Date.now() - new Date(st.updatedAt).getTime() : 0;
+  b.classList.toggle('on', !!(st && st.status === 'active' && G && !G.over &&
+    G.mode === 'live' && idleMs > 120000 && G.chess.turn() !== G.playerColor));
+}
+
+$('#btn-claim').onclick = async ()=>{
+  sfx.ui();
+  if(!G || G.over || !G.matchId) return;
+  if(!await confirmDialog('Claim the win?',
+      'Your opponent hasn\'t moved in over two minutes. Claiming ends the match in your favour and counts as a rated win.',
+      'CLAIM')) return;
+  try{
+    const oc = await Backend.claimWin(G.matchId);
+    stopRelay();
+    G.serverEnd = {status:'finished', result:oc.result, cause:oc.cause, nukedBy:null};
+    endGame();
+  }catch(e){
+    console.error(e);
+    toast('Can\'t claim yet — they still have time on the clock.');
+  }
+};
+
 /* a yes/no modal so one stray tap can't end or abandon a game */
 function confirmDialog(title, msg, yesLabel='CONFIRM'){
   return new Promise(res=>{
@@ -2671,8 +3000,25 @@ function confirmDialog(title, msg, yesLabel='CONFIRM'){
 /* in-game controls */
 $('#btn-quit').onclick = async ()=>{
   sfx.ui();
+  const live = !!(G && !G.over && G.mode==='live' && G.matchId);
   if(G && !G.over && !await confirmDialog('Leave this game?',
-      'You\'ll forfeit this match and return to the menu. This can\'t be undone.', 'LEAVE')) return;
+      live ? 'You\'ll resign this match. There\'s a real person on the other side of the board, so it counts as a rated loss.'
+           : 'You\'ll forfeit this match and return to the menu. This can\'t be undone.', 'LEAVE')) return;
+  /* Walking away from a live match without telling anyone would leave the
+     other player staring at the board for two minutes before they could
+     claim it. Resign properly. The server scores a resignation against
+     whoever sent it, so the result here isn't ours to state. */
+  if(live){
+    try{
+      const oc = await Backend.finishMatch(G.matchId, 'd', 'resign');
+      if(oc){
+        Object.assign(P, {rating:oc.rating, games:oc.games, wins:oc.wins,
+          losses:oc.losses, draws:oc.draws, kills:oc.kills, bestLeague:oc.bestLeague});
+        saveProfile();
+      }
+    }catch(e){ console.error('could not resign cleanly', e); }
+  }
+  stopRelay();
   cancelDrag(); gameToken++; G && (G.over=true); clearSavedGame();
   updateNukeUI();
   showScreen('#scr-home'); refreshHome();
