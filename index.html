@@ -342,9 +342,10 @@
   .acct-state b{color:var(--bone); font-style:normal;}
   .acct-state.good{color:#8fd394;}
   .acct-state.good b{color:#c7f0c9;}
-  #acct-email{width:100%; padding:12px 14px; border-radius:10px; border:1px solid #46303a;
+  #acct-email,#acct-pass{width:100%; padding:12px 14px; border-radius:10px; border:1px solid #46303a;
     background:#1b1218; color:var(--bone); font-size:16px; font-family:inherit; text-align:center;}
-  #acct-email:focus{outline:none; border-color:var(--blood2);}
+  #acct-email:focus,#acct-pass:focus{outline:none; border-color:var(--blood2);}
+  #acct-pass{margin-top:8px;}
   #acct-go[disabled]{opacity:.55; cursor:default;}
   /* the pill on the home screen that nags until the account is recoverable */
   #home-secure{display:none; margin:10px auto 0; font-size:12.5px; letter-spacing:.3px;
@@ -720,6 +721,8 @@
     <div class="acct-state" id="acct-state"></div>
     <input id="acct-email" type="email" inputmode="email" autocomplete="email"
            placeholder="you@example.com" spellcheck="false">
+    <input id="acct-pass" type="password" autocomplete="current-password"
+           placeholder="your password" spellcheck="false">
     <div class="err" id="acct-err"></div>
     <button class="go" id="acct-go">SEND ME THE LINK</button>
     <div class="nuke-demo" id="acct-note">
@@ -728,6 +731,8 @@
       rating, same record, same warheads.
     </div>
     <button class="linkish" id="acct-switch"></button>
+    <button class="linkish" id="acct-otp">Email me a one-tap link instead</button>
+    <button class="linkish" id="acct-setpass">Set or change your password</button>
     <button class="linkish danger" id="acct-delete">Delete my account</button>
     <button class="linkish" data-close>close</button>
   </div>
@@ -924,6 +929,9 @@ const Local = {
   accountState(){ return Promise.resolve({signedIn:false, secured:false, email:null}); },
   linkEmail(){ return Promise.reject(new Error('You appear to be offline. Reconnect and try again.')); },
   restoreAccount(){ return Promise.reject(new Error('You appear to be offline. Reconnect and try again.')); },
+  securePassword(){ return Promise.reject(new Error('You appear to be offline. Reconnect and try again.')); },
+  signInPassword(){ return Promise.reject(new Error('You appear to be offline. Reconnect and try again.')); },
+  setPassword(){ return Promise.reject(new Error('You appear to be offline. Reconnect and try again.')); },
   deleteAccount(){ return Promise.reject(new Error('You appear to be offline. Reconnect and try again.')); },
 };
 
@@ -1151,6 +1159,32 @@ function makeSupabaseBackend(){
       const {error} = await sb.auth.updateUser({email}, {emailRedirectTo: RETURN_URL});
       if(error) throw error;
       return {sent:true};
+    },
+
+    /* Sets the password at the same time as the address. The password applies
+       immediately; the email still needs confirming, which is what 'secured'
+       actually checks. A password is the only recovery route that does not
+       depend on an email arriving, and the thing being recovered cost
+       somebody $100. */
+    async securePassword(email, password){
+      const {error} = await sb.auth.updateUser({email, password}, {emailRedirectTo: RETURN_URL});
+      if(error) throw error;
+      return {sent:true};
+    },
+
+    /* The no-email route back in. This replaces the current anonymous session,
+       so the caller reloads rather than swapping state underneath itself. */
+    async signInPassword(email, password){
+      const {error} = await sb.auth.signInWithPassword({email, password});
+      if(error) throw error;
+      return {signedIn:true};
+    },
+
+    /* For accounts secured before passwords existed, and for changing one. */
+    async setPassword(password){
+      const {error} = await sb.auth.updateUser({password});
+      if(error) throw error;
+      return {ok:true};
     },
 
     /* Same account, different browser. The magic link signs them back into
@@ -2932,19 +2966,36 @@ async function refreshAccount(){
 }
 
 function paintAccount(){
-  const secured = !!ACCT.secured, restore = ACCT.mode === 'restore';
-  const st = $('#acct-state'), go = $('#acct-go');
+  const secured = !!ACCT.secured;
+  const mode = ACCT.mode;                       // 'link' | 'restore' | 'setpass'
+  const st = $('#acct-state'), go = $('#acct-go'), pass = $('#acct-pass');
   $('#acct-err').textContent = '';
-  st.className = 'acct-state' + (secured ? ' good' : '');
-  $('#acct-email').style.display = secured ? 'none' : '';
-  go.style.display               = secured ? 'none' : '';
-  $('#acct-note').style.display  = secured ? 'none' : '';
-  $('#acct-switch').style.display = secured ? 'none' : '';
+
+  const showForm = !secured || mode === 'setpass';
+  $('#acct-email').style.display   = (showForm && mode !== 'setpass') ? '' : 'none';
+  pass.style.display               = showForm ? '' : 'none';
+  go.style.display                 = showForm ? '' : 'none';
   go.disabled = false;
-  $('#acct-delete').style.display = ACCT.signedIn ? '' : 'none';
+  $('#acct-note').style.display    = mode === 'link' ? '' : 'none';
+  $('#acct-switch').style.display  = (!secured && mode !== 'setpass') ? '' : 'none';
+  $('#acct-otp').style.display     = mode === 'restore' ? '' : 'none';
+  $('#acct-setpass').style.display = (secured && mode !== 'setpass') ? '' : 'none';
+  $('#acct-delete').style.display  = (ACCT.signedIn && mode !== 'setpass') ? '' : 'none';
+  st.className = 'acct-state' + (secured && mode !== 'setpass' ? ' good' : '');
+
+  if(mode === 'setpass'){
+    $('#acct-title').textContent = '\u{1F511} SET A PASSWORD';
+    $('#acct-sub').textContent   = 'So you never depend on an email arriving.';
+    st.textContent = 'Choose a password for ' + (ACCT.email || 'this account')
+      + '. You can then sign in with it on any device, without waiting for a link.';
+    pass.placeholder = 'new password (8+ characters)';
+    pass.autocomplete = 'new-password';
+    go.textContent = 'SAVE PASSWORD';
+    return;
+  }
 
   if(secured){
-    $('#acct-title').textContent = '🔒 ACCOUNT SECURED';
+    $('#acct-title').textContent = '\u{1F512} ACCOUNT SECURED';
     $('#acct-sub').textContent   = 'Nothing here can be lost by clearing your browser.';
     st.textContent = '';
     const b = document.createElement('b');
@@ -2953,37 +3004,97 @@ function paintAccount(){
       + 'address, and your rating and warheads come with you.');
     return;
   }
-  if(restore){
+
+  if(mode === 'restore'){
     $('#acct-title').textContent = '↩ RESTORE YOUR ACCOUNT';
     $('#acct-sub').textContent   = 'Already secured one? Sign back into it.';
-    st.textContent = 'Enter the email you used. We\'ll send a one-tap link that '
-      + 'signs you back into the same account — same rating, same warheads.';
-    go.textContent = 'EMAIL ME A SIGN-IN LINK';
+    st.textContent = 'Enter the email and password you used. No password yet? Use '
+      + 'the one-tap link below, then set one from this panel.';
+    pass.placeholder = 'your password';
+    pass.autocomplete = 'current-password';
+    go.textContent = 'SIGN IN';
     $('#acct-switch').textContent = 'Actually, secure this account instead';
   } else {
-    $('#acct-title').textContent = '🔒 SECURE YOUR ACCOUNT';
+    $('#acct-title').textContent = '\u{1F512} SECURE YOUR ACCOUNT';
     $('#acct-sub').textContent   = 'So a cleared browser can never cost you a warhead.';
     st.textContent = 'This account exists only in this browser right now. Add an '
-      + 'email and it becomes permanently yours — you keep the rating, record and '
-      + 'warheads you already have.';
-    go.textContent = 'SEND ME THE LINK';
+      + 'email and a password and it becomes permanently yours — you keep the '
+      + 'rating, record and warheads you already have.';
+    pass.placeholder = 'choose a password (8+ characters)';
+    pass.autocomplete = 'new-password';
+    go.textContent = 'SECURE MY ACCOUNT';
     $('#acct-switch').textContent = 'I already have an account — restore it';
   }
 }
 
 function openAccount(mode){
-  ACCT.mode = mode === 'restore' ? 'restore' : 'link';
+  ACCT.mode = (mode === 'restore' || mode === 'setpass') ? mode : 'link';
   $('#acct-email').value = '';
+  $('#acct-pass').value = '';
   paintAccount();
   openOv('#ov-account');
   if(!ACCT.secured) setTimeout(()=> $('#acct-email').focus(), 60);
+}
+
+/* Supabase phrases its errors for developers, not for someone mid-purchase. */
+function acctError(e){
+  const m = (e && e.message) || '';
+  return /invalid login credentials|invalid.*password/i.test(m)
+      ? 'Wrong email or password. If you only just secured this account, open the '
+        + 'confirmation link we emailed you first — signing in does not work until you do.'
+    : /email not confirmed/i.test(m)
+      ? 'That email has not been confirmed yet. Open the confirmation link we sent, then sign in.'
+    : /not found|no user|signups not allowed/i.test(m)
+      ? 'No account with that email. If you have never secured one, choose "secure this account" instead.'
+    : /already.*(registered|exists|taken)/i.test(m)
+      ? 'That email already belongs to an account — choose "restore it" to sign back in.'
+    : /password.*(short|least|weak|character)/i.test(m)
+      ? 'That password is too short.'
+    : /rate|limit|seconds|after/i.test(m)
+      ? 'Too many attempts just now. Wait a minute and try again.'
+    : (m || 'Something went wrong. Try again in a moment.');
 }
 
 $('#home-secure').onclick = ()=>{ sfx.ui(); openAccount('link'); };
 $('#acct-switch').onclick = ()=>{
   sfx.ui();
   ACCT.mode = ACCT.mode === 'restore' ? 'link' : 'restore';
+  $('#acct-pass').value = '';
   paintAccount();
+};
+$('#acct-setpass').onclick = ()=>{
+  sfx.ui();
+  ACCT.mode = 'setpass';
+  $('#acct-pass').value = '';
+  paintAccount();
+  setTimeout(()=> $('#acct-pass').focus(), 60);
+};
+
+/* The magic link stays: it is still the only way in for anyone who secured an
+   account before passwords existed, or who has forgotten theirs. */
+$('#acct-otp').onclick = async function(){
+  const email = $('#acct-email').value.trim().toLowerCase();
+  const err = $('#acct-err');
+  if(!EMAIL_RE.test(email)){ err.textContent = 'Enter your email first.'; return; }
+  sfx.ui();
+  const label = this.textContent;
+  this.disabled = true; this.textContent = 'sending…'; err.textContent = '';
+  try{
+    await Backend.restoreAccount(email);
+    const st = $('#acct-state');
+    st.className = 'acct-state good';
+    st.textContent = 'Check ' + email + ' — the link is on its way. Open it on '
+      + 'this device and you are done. Give it a minute, and look in spam if it is shy.';
+    $('#acct-email').style.display = 'none';
+    $('#acct-pass').style.display = 'none';
+    $('#acct-switch').style.display = 'none';
+    $('#acct-go').style.display = 'none';
+    this.style.display = 'none';
+  }catch(e){
+    console.error('sign-in link failed', e);
+    err.textContent = acctError(e);
+    this.disabled = false; this.textContent = label;
+  }
 };
 
 /* Irreversible, and it can destroy a warhead somebody paid $100 for, so it
@@ -3009,36 +3120,60 @@ $('#acct-delete').onclick = async ()=>{
 };
 
 $('#acct-go').onclick = async function(){
-  const email = $('#acct-email').value.trim().toLowerCase();
   const err = $('#acct-err');
-  if(!EMAIL_RE.test(email)){ err.textContent = 'That doesn\'t look like an email address.'; return; }
+  const mode = ACCT.mode;
+  const email = $('#acct-email').value.trim().toLowerCase();
+  const pass  = $('#acct-pass').value;
+
+  if(mode !== 'setpass' && !EMAIL_RE.test(email)){
+    err.textContent = 'That does not look like an email address.'; return;
+  }
+  if(pass.length < 8){
+    err.textContent = 'Password must be at least 8 characters.'; return;
+  }
+
   sfx.ui();
   const label = this.textContent;
-  this.disabled = true; this.textContent = 'SENDING…'; err.textContent = '';
+  this.disabled = true; err.textContent = '';
+  const st = $('#acct-state');
+
   try{
-    if(ACCT.mode === 'restore') await Backend.restoreAccount(email);
-    else                        await Backend.linkEmail(email);
-    const st = $('#acct-state');
+    if(mode === 'restore'){
+      this.textContent = 'SIGNING IN…';
+      await Backend.signInPassword(email, pass);
+      /* A different session means different entitlements, rating and history,
+         so the app reboots instead of swapping them in underneath itself. */
+      location.replace(RETURN_URL);
+      return;
+    }
+    if(mode === 'setpass'){
+      this.textContent = 'SAVING…';
+      await Backend.setPassword(pass);
+      st.className = 'acct-state good';
+      st.textContent = 'Password saved. You can sign in with it on any device now.';
+      $('#acct-pass').style.display = 'none';
+      $('#acct-setpass').style.display = 'none';
+      this.style.display = 'none';
+      return;
+    }
+    this.textContent = 'SECURING…';
+    await Backend.securePassword(email, pass);
     st.className = 'acct-state good';
-    st.textContent = `Check ${email} — the link is on its way. Open it on this `
-      + `device and you're done. Give it a minute, and look in spam if it's shy.`;
+    st.textContent = 'Password set. Now open the confirmation link we sent to '
+      + email + ' to finish securing the account — until you do, it is not '
+      + 'recoverable.';
     $('#acct-email').style.display = 'none';
+    $('#acct-pass').style.display = 'none';
     $('#acct-switch').style.display = 'none';
+    $('#acct-otp').style.display = 'none';
     this.style.display = 'none';
   }catch(e){
-    console.error('account email failed', e);
-    const m = (e && e.message) || '';
-    err.textContent =
-      /not found|no user|signups not allowed/i.test(m)
-        ? 'No account with that email. If you\'ve never secured one, choose "secure this account" instead.'
-      : /already.*(registered|exists|taken)/i.test(m)
-        ? 'That email already belongs to an account — choose "restore it" to sign back in.'
-      : /rate|limit|seconds|after/i.test(m)
-        ? 'Too many emails just now. Wait a minute and try again.'
-      : (m || 'Could not send the email. Try again in a moment.');
+    console.error('account action failed', mode, e);
+    err.textContent = acctError(e);
     this.disabled = false; this.textContent = label;
   }
 };
+
 $('#store-buy').onclick = async function(){
   if(this.disabled) return;
   sfx.ui();
