@@ -2347,7 +2347,7 @@ const NUKE_PRICE_USD = 100;
 /* A nuke costs a charge only when it's fired at a real person. Bots are
    free forever once you've bought one — including the bot you get when the
    15s live search finds nobody, since that isn't a human either. */
-const nukeCosts = () => !!G && G.mode !== 'bot';
+const nukeCosts = () => !!G && !!G.matchId; // charges track the server rule: a real match row costs, bots/couch are free
 const nukeAvailable = () => !!P.nukeUnlocked && (!nukeCosts() || (P.nukes|0) > 0);
 const canNuke = ()=> !!G && !G.over && !G.busy && nukeAvailable();
 
@@ -3571,5 +3571,17 @@ window.GC = {
   set backend(b){ Backend = b; },
 };
 </script>
+<!-- Age gate: GoreChess is an 18+ product; this must be the first thing a new visitor answers. -->
+<div id="agegate" style="position:fixed;inset:0;z-index:99999;background:#0a0a0c;display:none;align-items:center;justify-content:center;text-align:center;padding:24px">
+  <div style="max-width:440px">
+    <div style="font:900 34px/1 system-ui,Segoe UI,sans-serif;color:#e63946;letter-spacing:2px;margin-bottom:14px">18+ ONLY</div>
+    <p style="color:#cfcfcf;font:15px/1.55 system-ui,Segoe UI,sans-serif;margin:0 0 22px">GoreChess contains graphic stylized violence &mdash; animated executions, blood, and gore. You must be 18 or older to enter.</p>
+    <button id="agegate-in" style="cursor:pointer;background:#e63946;color:#fff;border:0;border-radius:8px;font:800 16px system-ui,sans-serif;padding:14px 26px;margin-right:14px">I AM 18+ &mdash; ENTER</button>
+    <a href="https://www.google.com" style="color:#888;font:14px system-ui,sans-serif">Leave</a>
+  </div>
+</div>
+<script>(function(){var ok=false;try{ok=localStorage.getItem('gc_age18')==='1';}catch(e){}
+if(ok)return;var g=document.getElementById('agegate');if(!g)return;g.style.display='flex';
+document.getElementById('agegate-in').onclick=function(){try{localStorage.setItem('gc_age18','1');}catch(e){}g.remove();};})();</script>
 </body>
 </html>
