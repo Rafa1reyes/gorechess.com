@@ -332,6 +332,8 @@
   #store-buy:disabled{opacity:.55; cursor:default;}
 
   /* ---------- ACCOUNT SECURITY ---------- */
+  .linkish.danger{color:#b8534a;}
+  .linkish.danger:hover{color:#e0675b;}
   .acct-warn{display:none; text-align:left; font-size:12.5px; line-height:1.55; color:#e6c98c;
     background:#2a1d08; border:1px solid #7a5510; border-radius:9px; padding:10px 12px; margin:12px 0;}
   .acct-warn.on{display:block;}
@@ -726,6 +728,7 @@
       rating, same record, same warheads.
     </div>
     <button class="linkish" id="acct-switch"></button>
+    <button class="linkish danger" id="acct-delete">Delete my account</button>
     <button class="linkish" data-close>close</button>
   </div>
 </div>
@@ -921,6 +924,7 @@ const Local = {
   accountState(){ return Promise.resolve({signedIn:false, secured:false, email:null}); },
   linkEmail(){ return Promise.reject(new Error('You appear to be offline. Reconnect and try again.')); },
   restoreAccount(){ return Promise.reject(new Error('You appear to be offline. Reconnect and try again.')); },
+  deleteAccount(){ return Promise.reject(new Error('You appear to be offline. Reconnect and try again.')); },
 };
 
 /* =====================================================================
@@ -1157,6 +1161,17 @@ function makeSupabaseBackend(){
       });
       if(error) throw error;
       return {sent:true};
+    },
+
+    /* Destroys the auth user and strips every personal field. Match rows
+       deliberately survive: they are the opponent's history and the
+       provenance of their rating, so erasing them would rewrite someone
+       else's record. See backend/002_account_deletion.sql. */
+    async deleteAccount(){
+      const {error} = await sb.rpc('gc_delete_account');
+      if(error) throw error;
+      try{ await sb.auth.signOut(); }catch(e){}
+      return {deleted:true};
     },
 
     watchMatch(matchId, onChange){
@@ -2926,6 +2941,7 @@ function paintAccount(){
   $('#acct-note').style.display  = secured ? 'none' : '';
   $('#acct-switch').style.display = secured ? 'none' : '';
   go.disabled = false;
+  $('#acct-delete').style.display = ACCT.signedIn ? '' : 'none';
 
   if(secured){
     $('#acct-title').textContent = '🔒 ACCOUNT SECURED';
@@ -2968,6 +2984,28 @@ $('#acct-switch').onclick = ()=>{
   sfx.ui();
   ACCT.mode = ACCT.mode === 'restore' ? 'link' : 'restore';
   paintAccount();
+};
+
+/* Irreversible, and it can destroy a warhead somebody paid $100 for, so it
+   asks twice and states the cost both times. */
+$('#acct-delete').onclick = async ()=>{
+  sfx.ui();
+  if(!await confirmDialog('Delete your account?',
+      'This erases your rating, your record and any warheads you own. Warheads '
+    + 'are not refunded. Games you have already played stay on record for your '
+    + 'opponents, but nothing in them will point back to you.', 'CONTINUE')) return;
+  if(!await confirmDialog('Last chance.',
+      'This is permanent and immediate. There is no undo and no recovery, even '
+    + 'with the same email.', 'DELETE FOREVER')) return;
+  try{
+    await Backend.deleteAccount();
+  }catch(e){
+    console.error('account deletion failed', e);
+    toast('Could not delete the account. Try again in a moment.');
+    return;
+  }
+  try{ localStorage.clear(); }catch(e){}
+  location.replace(RETURN_URL);
 };
 
 $('#acct-go').onclick = async function(){
