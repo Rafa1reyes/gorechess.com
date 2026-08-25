@@ -878,6 +878,10 @@ const Local = {
     return {ok:true, nukes:P.nukes, unlocked:true};
   },
 
+  /* Offline there is no Play either. Same shape as purchaseNuke so the store
+     UI does not have to care which path it took. */
+  async purchaseNukePlay(){ return Local.purchaseNuke(); },
+
   /* becomes the gc_spend_nuke() RPC.
      consume=false — bot match: unlimited once unlocked, costs no charge.
      consume=true  — real opponent: atomic decrement, so a double-tap can't
@@ -949,6 +953,24 @@ const Local = {
 const SUPABASE_URL  = 'https://nfvtxanvofquxfkunqbl.supabase.co';
 const SUPABASE_KEY  = 'sb_publishable_GgkdotLzv1NakqXwyoKYiw_WIF-cwTZ';
 const NUKE_PAY_LINK = 'https://buy.stripe.com/eVqcN5c8wdb5eWSa8S67S00';
+
+/* --- Google Play Billing -------------------------------------------------
+   Play requires digital goods sold *inside the Android app* to go through
+   Play Billing. The website may keep Stripe: the policy governs the app, not
+   the domain, so gorechess.com still takes the full $100 while the Play build
+   gives Google its cut.
+
+   Chrome exposes the Digital Goods API only inside a Play-installed TWA, so
+   its presence IS the "am I the Android build?" test. That beats sniffing the
+   user agent or shipping a build flag that can drift out of sync. */
+const PLAY_BILLING = 'https://play.google.com/billing';
+const PLAY_SKU     = 'nuke';
+
+async function playBillingService(){
+  if(typeof window.getDigitalGoodsService !== 'function') return null;
+  try{ return await window.getDigitalGoodsService(PLAY_BILLING); }
+  catch(e){ return null; }        // web build, or billing genuinely unavailable
+}
 /* Where the confirmation / magic link drops the player back. Must also be on
    the Supabase project's redirect allow-list, or Supabase silently sends them
    to the project's Site URL instead — which is PoolTidy, not GoreChess. */
@@ -1042,6 +1064,67 @@ function makeSupabaseBackend(){
         if(e.nukes > before) return {ok:true, nukes:e.nukes, unlocked:e.unlocked};
       }
       return {ok:false, nukes:before, reason:'timeout'};
+    },
+
+    /* The Android path. The order here is not interchangeable:
+         pay -> verify server-side (credits AND acknowledges) -> tell Play it
+         succeeded -> consume.
+       Consuming before the server credits would drop a paid purchase on the
+       floor if verification failed. Never acknowledging at all makes Play
+       auto-refund the sale after three days. play-verify does the crediting
+       and the acknowledge; the consume has to happen here because only the
+       client holds the Digital Goods service. */
+    async purchaseNukePlay(svc){
+      const before = (await B.entitlements()).nukes;
+
+      let details;
+      try{ details = await svc.getDetails([PLAY_SKU]); }
+      catch(e){ console.error('getDetails failed', e); return {ok:false, nukes:before, reason:'error'}; }
+      if(!details || !details.length) return {ok:false, nukes:before, reason:'no such product'};
+
+      const item = details[0];
+      const req = new PaymentRequest(
+        [{supportedMethods: PLAY_BILLING, data:{sku: PLAY_SKU}}],
+        {total:{label: item.title || 'Tactical Nuke',
+                amount:{currency: item.price.currency, value: item.price.value}}});
+
+      let resp;
+      try{ resp = await req.show(); }
+      catch(e){ return {ok:false, nukes:before, reason:'cancelled'}; }
+
+      const purchaseToken = resp.details && resp.details.purchaseToken;
+      if(!purchaseToken){
+        try{ await resp.complete('fail'); }catch(e){}
+        return {ok:false, nukes:before, reason:'no token'};
+      }
+
+      try{
+        const {data:{session}} = await sb.auth.getSession();
+        const r = await fetch(SUPABASE_URL + '/functions/v1/play-verify', {
+          method:'POST',
+          headers:{'content-type':'application/json', apikey: SUPABASE_KEY,
+                   authorization:'Bearer ' + (session ? session.access_token : '')},
+          body: JSON.stringify({productId: PLAY_SKU, purchaseToken}),
+        });
+        const body = await r.json().catch(()=>({}));
+        if(!r.ok || !body.ok){
+          try{ await resp.complete('fail'); }catch(e){}
+          return {ok:false, nukes:before, reason:'unverified'};
+        }
+        try{ await resp.complete('success'); }catch(e){}
+
+        /* Consumable: each purchase is one charge, so Play must be told the
+           item was used or the player can never buy a second warhead. */
+        try{ if(svc.consume) await svc.consume(purchaseToken); }
+        catch(e){ console.warn('consume failed', e); }
+
+        const e2 = await B.entitlements();
+        return {ok:true, nukes:e2.nukes, unlocked:e2.unlocked};
+      }catch(e){
+        console.error('play verify failed', e);
+        try{ await resp.complete('fail'); }catch(e2){}
+        return {ok:false, nukes:before, reason:'error'};
+      }
     },
 
     async spendNuke({matchId, consume} = {}){
@@ -3191,13 +3274,19 @@ $('#store-buy').onclick = async function(){
     return;
   }
 
+  /* Presence of the Digital Goods service decides the path: Play Billing in
+     the Android build, Stripe everywhere else. */
+  const svc = await playBillingService();
+
   const label = this.textContent;
   this.disabled = true;
-  this.textContent = 'WAITING FOR PAYMENT…';
-  $('#store-owned').textContent = 'Finish checkout in the tab that just opened. This window will update by itself.';
+  this.textContent = svc ? 'OPENING GOOGLE PLAY…' : 'WAITING FOR PAYMENT…';
+  $('#store-owned').textContent = svc
+    ? 'Confirm the purchase in the Google Play sheet.'
+    : 'Finish checkout in the tab that just opened. This window will update by itself.';
 
   let res;
-  try{ res = await Backend.purchaseNuke(); }
+  try{ res = svc ? await Backend.purchaseNukePlay(svc) : await Backend.purchaseNuke(); }
   catch(e){ console.error(e); res = {ok:false, reason:'error'}; }
 
   this.disabled = false;
