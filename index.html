@@ -714,6 +714,23 @@
 
 <!-- Securing the account: an anonymous player lives in one browser's storage,
      which is fine for a rating and unacceptable for a $100 warhead. -->
+<!-- Someone started searching while this player was stuck with a bot. Not
+     dismissible by backdrop or Escape on purpose: it is a decision, and both
+     answers are one tap away. -->
+<div class="overlay" id="ov-invite">
+  <div class="modal">
+    <h2>⚔️ SOMEONE'S IN THE ARENA</h2>
+    <p class="sub" id="inv-sub">A real opponent is looking for a match right now.</p>
+    <div class="acct-state" id="inv-state"></div>
+    <div class="go-btns">
+      <button class="go" id="inv-yes">✅ LEAVE THE BOT — FIGHT THEM</button>
+      <button class="sbtn" id="inv-no" style="font-size:16px">❌ Stay in this game</button>
+    </div>
+    <div class="nuke-demo">Abandoning a bot match costs you nothing — no result is
+      recorded, so your rating and body count are untouched.</div>
+  </div>
+</div>
+
 <div class="overlay" id="ov-account">
   <div class="modal">
     <h2 id="acct-title">🔒 SECURE YOUR ACCOUNT</h2>
@@ -937,6 +954,10 @@ const Local = {
   signInPassword(){ return Promise.reject(new Error('You appear to be offline. Reconnect and try again.')); },
   setPassword(){ return Promise.reject(new Error('You appear to be offline. Reconnect and try again.')); },
   deleteAccount(){ return Promise.reject(new Error('You appear to be offline. Reconnect and try again.')); },
+  /* Offline there is no arena to watch. */
+  watchArena(){ return Promise.resolve(null); },
+  acceptInvite(){ return Promise.resolve(null); },
+  leaveArena(){ return Promise.resolve(); },
 };
 
 /* =====================================================================
@@ -1289,6 +1310,38 @@ function makeSupabaseBackend(){
       if(error) throw error;
       try{ await sb.auth.signOut(); }catch(e){}
       return {deleted:true};
+    },
+
+    /* Standing "I'd still rather play a human" interest, refreshed on every
+       poll. joined_at doubles as a heartbeat, so a closed tab is reaped by
+       the same 45s sweep that clears abandoned searches. Returns the best
+       actively-searching opponent, or null. */
+    async watchArena(){
+      const {data, error} = await sb.rpc('gc_watch_arena');
+      if(error) throw error;
+      const r = Array.isArray(data) ? data[0] : data;
+      return r && r.out_id
+        ? {id:r.out_id, name:r.out_name, av:r.out_avatar, rating:r.out_rating}
+        : null;
+    },
+
+    /* The green tick. Returns null when the searcher gave up first, which is
+       common and must not be dressed up as a match. */
+    async acceptInvite(){
+      const {data, error} = await sb.rpc('gc_accept_invite');
+      if(error) throw error;
+      const r = Array.isArray(data) ? data[0] : data;
+      return r && r.out_match_id
+        ? {matchId:r.out_match_id, color:r.out_color, id:r.out_opp_id,
+           name:r.out_opp_name, av:r.out_opp_avatar, rating:r.out_opp_rating}
+        : null;
+    },
+
+    async leaveArena(){
+      try{
+        const {data:{user}} = await sb.auth.getUser();
+        if(user) await sb.from('gc_queue').delete().eq('player_id', user.id);
+      }catch(e){}
     },
 
     watchMatch(matchId, onChange){
@@ -3476,9 +3529,100 @@ async function runMatchmaking(){
 
   /* empty arena — say so plainly and send in the machine */
   const bot = botNearest(P.rating);
-  return presentMatch(signal, bot, 'bot', 'ARENA EMPTY',
+  await presentMatch(signal, bot, 'bot', 'ARENA EMPTY',
     `No live players right now — you're fighting ${bot.name}, a bot. Still rated.`);
+
+  /* ...and keep listening. Without this, the next person to search cannot see
+     this player at all, and two people who each wanted a live match sit in
+     separate bot games a few seconds apart. */
+  if(!signal.aborted) startArenaWatch();
 }
+
+/* =====================================================================
+   ARENA WATCH — "someone just showed up".
+
+   Only ever runs during a bot game that happened *because* a live search
+   found nobody. The server will not auto-pair a watcher (gc_find_match
+   ignores open_to_invite rows), so nothing can drag this player into a real
+   match without them tapping the tick.
+===================================================================== */
+let arenaWatch = null;
+let inviteOpen = false;
+
+function startArenaWatch(){
+  stopArenaWatch();
+  if(!ONLINE || !G || G.mode !== 'bot' || G.over) return;
+  arenaWatch = {timer:null, busy:false, declined:new Set(), token:gameToken};
+  arenaWatch.timer = setInterval(arenaTick, 2500);
+  arenaTick();
+}
+
+function stopArenaWatch(){
+  if(!arenaWatch) return;
+  clearInterval(arenaWatch.timer);
+  arenaWatch = null;
+  try{ Backend.leaveArena(); }catch(e){}
+}
+
+async function arenaTick(){
+  const w = arenaWatch;
+  if(!w || w.busy || inviteOpen) return;
+  /* gameToken moves on every startGame, so a rematch, a quit or an accepted
+     invite all end the watch without needing their own teardown. */
+  if(!G || G.over || G.mode !== 'bot' || gameToken !== w.token){ stopArenaWatch(); return; }
+  w.busy = true;
+  try{
+    const foe = await Backend.watchArena();
+    if(foe && arenaWatch === w && !w.declined.has(foe.id) && !inviteOpen) showInvite(foe);
+  }catch(e){ console.warn('arena watch failed', e); }
+  finally{ if(arenaWatch === w) w.busy = false; }
+}
+
+function showInvite(foe){
+  inviteOpen = true;
+  arenaWatch.pending = foe;
+  $('#inv-sub').textContent = 'A real opponent is looking for a match right now.';
+  const st = $('#inv-state');
+  st.textContent = '';
+  const b = document.createElement('b');
+  b.textContent = (foe.av || '\u{1F9DF}') + ' ' + foe.name;
+  st.append(b, ' (' + foe.rating + ') is searching. Take the fight, or stay where you are.');
+  sfx.promote();
+  openOv('#ov-invite');
+}
+
+$('#inv-no').onclick = ()=>{
+  sfx.ui();
+  closeOv('#ov-invite');
+  inviteOpen = false;
+  /* Declined THIS player, not the idea. Somebody else showing up later still
+     gets to ask, but this one will not nag. */
+  if(arenaWatch && arenaWatch.pending) arenaWatch.declined.add(arenaWatch.pending.id);
+};
+
+$('#inv-yes').onclick = async function(){
+  sfx.ui();
+  const label = this.textContent;
+  this.disabled = true; this.textContent = 'JOINING\u2026';
+  let m = null;
+  try{ m = await Backend.acceptInvite(); }
+  catch(e){ console.error('accept invite failed', e); }
+  this.disabled = false; this.textContent = label;
+  closeOv('#ov-invite');
+  inviteOpen = false;
+  stopArenaWatch();
+
+  if(!m){
+    toast('They found someone else first. Still your move against the bot.');
+    return;
+  }
+  /* Walking out of a bot game costs nothing: no result is submitted, so no
+     rating and no body count changes hands. */
+  clearSavedGame();
+  startGame({mode:'live', opp:{name:m.name, av:m.av, rating:m.rating, id:m.id},
+             matchId:m.matchId, playerColor:m.color});
+  toast('Live match \u2014 good hunting.');
+};
 
 $('#btn-live').onclick = ()=>{ sfx.ui(); runMatchmaking(); };
 $('#mm-cancel').onclick = ()=>{ sfx.ui(); if(mmAbort) mmAbort.abort(); closeOv('#ov-mm'); };
