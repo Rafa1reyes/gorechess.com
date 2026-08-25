@@ -3518,14 +3518,28 @@ async function runMatchmaking(){
   const cyc = setInterval(()=>{ $('#mm-status').textContent = lines[++i % lines.length]; }, 2800);
   signal.addEventListener('abort', ()=> clearInterval(cyc), {once:true});
 
+  /* The search needs its own abort signal. The countdown winning the race
+     does NOT stop findOpponent() — its poll loop runs until aborted — and the
+     shared signal cannot be used, because aborting that also cancels the
+     bot-fallback presentation below. */
+  const searchAC = new AbortController();
+  signal.addEventListener('abort', ()=> searchAC.abort(), {once:true});
+
   const opp = await Promise.race([
-    findLiveOpponent(signal),
+    findLiveOpponent(searchAC.signal),
     countdown(MM_SEARCH_SECS, signal, setMmClock),
   ]);
   clearInterval(cyc);
   if(signal.aborted) return;                   // player cancelled the search
 
   if(opp) return presentMatch(signal, opp, 'live', 'OPPONENT FOUND', 'Rated match. Good hunting.');
+
+  /* Stop searching before anything else. Left running, the poll keeps
+     re-queueing this player as an ACTIVE searcher every 1.8s, so the server
+     will happily pair them into a live match while they sit in a bot game —
+     and the opponent waits forever for moves that never come. Aborting also
+     drops the queue row, so the arena watch below starts from a clean slate. */
+  searchAC.abort();
 
   /* empty arena — say so plainly and send in the machine */
   const bot = botNearest(P.rating);
