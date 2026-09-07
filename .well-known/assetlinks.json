@@ -3,6 +3,9 @@
   "target": {
     "namespace": "android_app",
     "package_name": "com.spindola.gorechess",
-    "sha256_cert_fingerprints": ["72:26:F7:A1:0D:35:EE:25:47:20:4B:BD:87:7F:88:9E:09:11:AE:12:9C:CB:2F:77:6B:28:85:F9:5F:89:13:4B"]
+    "sha256_cert_fingerprints": [
+      "72:26:F7:A1:0D:35:EE:25:47:20:4B:BD:87:7F:88:9E:09:11:AE:12:9C:CB:2F:77:6B:28:85:F9:5F:89:13:4B",
+      "B1:4E:DC:0B:25:13:43:A0:FA:6D:36:61:76:35:B2:53:11:A2:79:D0:70:87:1D:28:67:CE:B9:B9:68:59:5D:AB"
+    ]
   }
 }]
