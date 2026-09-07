@@ -1,0 +1,8 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "com.spindola.gorechess",
+    "sha256_cert_fingerprints": ["72:26:F7:A1:0D:35:EE:25:47:20:4B:BD:87:7F:88:9E:09:11:AE:12:9C:CB:2F:77:6B:28:85:F9:5F:89:13:4B"]
+  }
+}]
