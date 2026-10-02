@@ -27,16 +27,21 @@
 <main>
   <a class="back" href="/">← GoreChess</a>
   <h1>Privacy Policy</h1>
-  <p class="meta">Last updated 24 August 2026 · Spindola Software · spindola.software@gmail.com</p>
+  <p class="meta">Last updated 29 September 2026 · Spindola Software · spindola.software@gmail.com</p>
 
   <h2>What we collect</h2>
   <p><b>Account.</b> When you first open GoreChess an anonymous account is created for you,
-  identified by a random ID. We do not ask for your real name, email address, or phone
-  number to play.</p>
+  identified by a random ID. You can play without giving us your real name, email address,
+  or phone number.</p>
+  <p><b>Email address, only if you secure your account.</b> If you choose <i>Secure your
+  account</i>, we store the email address you enter and a password, which our processor
+  Supabase keeps only as a hash. We use the email address only to sign you in, to confirm
+  the address, and to recover the account. It is never shown to other players, and it is
+  deleted when you delete your account.</p>
   <p><b>Profile you choose.</b> The handle and avatar you pick. Your handle is visible to
   other players you are matched against.</p>
   <p><b>Game data.</b> Your rating, wins, losses, draws, games played, and in-game capture
-  count, plus records of matches you play.</p>
+  count, plus records of matches you play, including the moves.</p>
   <p><b>Purchases.</b> If you buy a Tactical Nuke we store which store it came from, the
   store's transaction identifier, the amount, and whether it was granted or refunded.</p>
 
@@ -55,22 +60,24 @@
   processors to run the game:</p>
   <table>
     <tr><th>Processor</th><th>Purpose</th><th>What it receives</th></tr>
-    <tr><td>Supabase</td><td>Accounts, game data, matchmaking</td><td>Account ID, handle, game records</td></tr>
+    <tr><td>Supabase</td><td>Accounts, game data, matchmaking</td><td>Account ID, email address (only if you secure the account), handle, game records</td></tr>
     <tr><td>Stripe</td><td>Payments on the website</td><td>Payment details you enter with Stripe directly</td></tr>
     <tr><td>Google Play Billing</td><td>Payments in the Android app</td><td>Handled by Google under its own policy</td></tr>
   </table>
   <p>Your handle, avatar, and rating are shown to other players when you are matched with
-  them — that is the point of a multiplayer game.</p>
+  them — that is the point of a multiplayer game. Your email address never is.</p>
 
   <h2>How long we keep it</h2>
   <p>Account and game data are kept while your account exists. Purchase records are kept as
   long as required for tax and accounting purposes, typically seven years.</p>
 
   <h2>Deleting your account</h2>
-  <p>You can delete your account yourself, from inside the game: open the account panel and
-  choose <b>Delete my account</b>. Step-by-step instructions are on the
+  <p>You can delete your account yourself, from inside the game: open the account panel
+  (<b>🔒 Secure your account</b> on the home screen, or <b>👤 Your account</b> once it is
+  secured) and choose <b>Delete my account</b>. Step-by-step instructions are on the
   <a href="/delete-account.html">account deletion page</a>.</p>
-  <p>Deleting destroys your sign-in, handle, avatar, rating, record and any Tactical Nuke you
+  <p>Deleting destroys your sign-in (including your email address), handle, avatar, rating,
+  record and any Tactical Nuke you
   own. <b>A Nuke is not refunded.</b> The matches you played do remain, because they are also
   your opponents' history and the reason their rating is what it is — but your handle in them
   is replaced with an anonymous tag, and nothing left in them identifies you. Purchase records

@@ -71,6 +71,10 @@
   .ars .wp{color:var(--blood2); font-size:13.5px;}
   .ars .fl{color:var(--dim); font-size:12.5px; font-style:italic;}
   .foot{text-align:center; color:#5c4a52; font-size:12px; margin:26px 0 8px; font-style:italic;}
+  .foot-links{text-align:center; color:#5c4a52; font-size:12.5px; margin:0 0 18px;}
+  .foot-links a, .foot-links button{color:var(--dim); text-decoration:underline; background:none; border:none; font:inherit; padding:4px 2px; cursor:pointer;}
+  .foot-links a:hover, .foot-links button:hover{color:var(--bone);}
+  a.linkish{display:inline-block;}
 
   /* ---------- SETUP MODALS ---------- */
   /* The overlay is position:fixed, so anything taller than the viewport used to
@@ -508,6 +512,7 @@
     </div>
   </div>
   <p class="foot">Stylized cartoon violence. GoreChess is a game — the pieces signed waivers.</p>
+  <p class="foot-links" id="foot-links" style="display:none"><a href="https://gorechess.com/privacy.html" target="_blank" rel="noopener">Privacy Policy</a> · <a href="mailto:spindola.software@gmail.com?subject=GoreChess%20support">Support</a></p>
 </div>
 
 <!-- ================= GAME ================= -->
@@ -752,6 +757,7 @@
     <button class="linkish" id="acct-otp">Email me a one-tap link instead</button>
     <button class="linkish" id="acct-setpass">Set or change your password</button>
     <button class="linkish danger" id="acct-delete">Delete my account</button>
+    <a class="linkish" id="acct-privacy" href="https://gorechess.com/privacy.html" target="_blank" rel="noopener" style="display:none">Privacy Policy</a>
     <button class="linkish" data-close>close</button>
   </div>
 </div>
@@ -827,6 +833,90 @@ const POOL = [
   {u:'TheLastGambit',       av:'🎩', rating:1720, wins:420, losses:96,  kills:4200, tag:'Legend. Retired three kings.'},
 ];
 
+/* =====================================================================
+   APPLE APP STORE BUILD — this same file, bundled by Capacitor (IOS.md).
+   Capacitor injects window.Capacitor before this script runs. The website
+   and the Play TWA never have it, so IOS_APP is false there and every
+   branch below leaves them exactly as they were.
+
+   What differs inside the iOS app, and why:
+   - No Black Market. A digital item sold inside an iOS app must go through
+     Apple's In-App Purchase, and an item bought elsewhere may be used in the
+     app only if the app ALSO sells it that way (3.1.1, 3.1.3(b)). Until the
+     nuke is an App Store product, this build neither sells nor unlocks it:
+     no store, no price, no launch button, no wording that points elsewhere.
+     A web player can still spend one on a live match against this player
+     until the server refuses that (IOS.md §6); the app then shows only that
+     the opponent ended the match, unrated (concludeFromServer).
+   - No demo Friends network: sample players are placeholder content (2.1).
+   - A handle is the one thing a player puts in front of other players, so
+     opponents' handles are filtered and can be reported or blocked, and
+     players agree to zero-tolerance Terms of Use before playing (1.2).
+   - Privacy Policy and Support links on the home screen and in the account
+     panel (5.1.1(i)). They are in the HTML but hidden; only this build shows
+     them, so the website's page is unchanged.
+   - Sign-in gives up after 8 s (signInWithin): the app starts offline.
+   - Email links land on gorechess.com: no mail app can open the app's own
+     capacitor://localhost address.
+===================================================================== */
+const IOS_APP = window.Capacitor?.getPlatform?.() === 'ios';
+const IOS_TXT = (web, ios) => IOS_APP ? ios : web;
+const SUPPORT_EMAIL = 'spindola.software@gmail.com';
+
+/* A thump on every kill and at checkmate. window.Capacitor.Plugins.Haptics
+   is injected by the iOS app's native side; everywhere else this is a no-op. */
+function haptic(kind){
+  const H = window.Capacitor?.Plugins?.Haptics;
+  if(!H) return;
+  try{
+    const p = kind === 'mate' ? H.notification({type:'WARNING'}) : H.impact({style:'HEAVY'});
+    if(p && p.catch) p.catch(()=>{});
+  }catch(e){}
+}
+
+/* Handles come back from the server unchecked — the database only limits
+   their length — so in the app they are checked again on the way in. Slurs,
+   sexual terms and hate only: violence is the game's whole vocabulary.
+   Tested after folding look-alike digits and dropping separators, so
+   "f_u_c_k" and "sh1t" don't slip through. */
+const BAD_NAME_RE = /fuck|fuk|shit|cunt|nigg|niga|fagg|bitch|whore|slut|rapist|retard|kike|chink|tranny|dyke|cock|dick|pussy|penis|vagina|porn|nazi|hitler|kkk|jizz|twat|wank|pedo|paedo|molest|cumshot/;
+const isOffensiveName = n => BAD_NAME_RE.test(String(n || '').toLowerCase()
+  .replace(/[0]/g,'o').replace(/[1!|]/g,'i').replace(/3/g,'e').replace(/[4@]/g,'a')
+  .replace(/[5$]/g,'s').replace(/7/g,'t').replace(/[^a-z]/g,''));
+
+/* Blocking is kept on this device (the server has no block list yet — see
+   IOS.md). A blocked player's handle and face are never shown again, and
+   their "someone's in the arena" invites are ignored. */
+const BLOCK_KEY = 'gorechess_blocked';
+function blockedIds(){
+  if(!IOS_APP) return [];
+  try{ const b = JSON.parse(localStorage.getItem(BLOCK_KEY)); return Array.isArray(b) ? b : []; }
+  catch(e){ return []; }
+}
+const isBlocked = id => !!id && blockedIds().includes(id);
+const APP_AVATARS = ['🧟','🥷','🧛','💀','👺','🤠','🐺','🦾','🎩','🌹','🪦'];
+
+/* For the few places that build HTML from text: anything that came from a
+   player (or from localStorage) goes through this first. */
+const esc = s => String(s ?? '').replace(/[&<>"']/g,
+  c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'})[c]);
+
+/* Every opponent the server hands us passes through here, on every platform.
+   The database only limits a handle's length, so a name that is not a legal
+   handle (NAME_RE: letters, digits, underscore — no markup) is replaced;
+   legal handles pass through untouched. In the iOS app offensive names,
+   unknown avatars and players this player blocked are replaced as well. */
+function ugcOpp(o){
+  if(!o) return o;
+  const legal = NAME_RE.test(String(o.name || ''));
+  if(!IOS_APP) return legal ? o : {...o, name:'Player'};
+  const blocked = isBlocked(o.id);
+  const bad = !legal || isOffensiveName(o.name);
+  return {...o,
+    name: blocked ? 'Blocked player' : bad ? 'Player' : o.name,
+    av:   blocked ? '👤' : APP_AVATARS.includes(o.av) ? o.av : DEFAULT_AV};
+}
+
 /* ---------------- profile / persistence ---------------- */
 const DEFAULT_AV = '🧟';
 function loadProfile(){
@@ -846,6 +936,7 @@ function loadProfile(){
           nukes:0, nukesUsed:0, nukesBought:0, nukeUnlocked:false};
 }
 let P = loadProfile();
+if(IOS_APP){ P.nukes = 0; P.nukeUnlocked = false; }   // see IOS_APP: nothing is unlocked in the iOS app
 const saveProfile = () => Backend.saveProfile(P);
 
 /* =====================================================================
@@ -997,6 +1088,11 @@ async function playBillingService(){
    the Supabase project's redirect allow-list, or Supabase silently sends them
    to the project's Site URL instead — which is PoolTidy, not GoreChess. */
 const RETURN_URL = location.origin + location.pathname;
+/* Where emailed links point. The same page on the web; in the iOS app the
+   page lives at capacitor://localhost, which no mail app can open, so the
+   link finishes on gorechess.com in Safari and the app sees the confirmed
+   address on its next account check (IOS.md, "Email links"). */
+const EMAIL_RETURN_URL = IOS_APP ? 'https://gorechess.com/' : RETURN_URL;
 /* Read before supabase-js strips the tokens out of the URL on start-up, so we
    can tell "they just came back from the email" from an ordinary page load. */
 const CAME_FROM_LINK = /access_token=|[?&#]type=(signup|magiclink|email_change|recovery)/
@@ -1012,13 +1108,19 @@ function makeSupabaseBackend(){
        creates the player + entitlement rows — done here rather than by a
        trigger on auth.users, which is shared with PoolTidy. */
     async signIn(){
-      let {data:{session}} = await sb.auth.getSession();
+      let {data:{session}, error:sessErr} = await sb.auth.getSession();
+      /* iOS app: a stored session that could not be refreshed for lack of
+         network is still this player's account. Never trade it for a fresh
+         anonymous one (that would orphan it); play offline instead. */
+      if(IOS_APP && sessErr && sessErr.name === 'AuthRetryableFetchError') throw sessErr;
       if(!session){
+        if(B.abandoned) throw new Error('sign-in abandoned');
         const {data, error} = await sb.auth.signInAnonymously();
         if(error) throw error;
         session = data.session;
       }
       let {data:rows, error} = await sb.rpc('gc_ensure_player');
+      if(error && B.abandoned) throw error;
       if(error){
         /* A stored session can outlive its user (deleted account, wiped
            project). Don't let that drop us to offline mode with a stale
@@ -1041,6 +1143,32 @@ function makeSupabaseBackend(){
           nukes:r.out_nukes, nukesUsed:r.out_nukes_used, nukeUnlocked:r.out_nuke_unlocked,
         },
       };
+    },
+
+    /* iOS app only (boot). The app bundles supabase-js, so unlike the website
+       it starts with no network at all; a stored session whose token has
+       expired is then retried with back-off for about 50 s before signIn()
+       gives up. Give up sooner, and once given up this client must not act on
+       its own: no background refreshes, no new anonymous user if the network
+       comes back late (the timed-out signIn() is still running). */
+    async signInWithin(ms){
+      let timer;
+      const late = new Promise((_, reject)=>{
+        timer = setTimeout(()=> reject(new Error('sign-in timed out after ' + ms + ' ms')), ms);
+      });
+      try{ return await Promise.race([B.signIn(), late]); }
+      catch(e){ B.abandon(); throw e; }
+      finally{ clearTimeout(timer); }
+    },
+    abandon(){
+      B.abandoned = true;
+      /* supabase-js restarts its 30-second refresh ticker when its own
+         start-up finishes, which with no network is ~25 s from now, so stop
+         it again then. (A late refresh would only renew this same player's
+         token, but an offline app has no business retrying forever.) */
+      const stop = ()=>{ try{ return sb.auth.stopAutoRefresh(); }catch(e){} };
+      try{ Promise.resolve(stop()).catch(()=>{}); }catch(e){}
+      try{ sb.auth.initialize().then(stop, stop).catch(()=>{}); }catch(e){}
     },
 
     /* Only the columns a player may write. Rating and kills are the server's;
@@ -1193,9 +1321,9 @@ function makeSupabaseBackend(){
             const r = Array.isArray(data) ? data[0] : data;
             if(r && r.out_match_id){
               done = true; mmPair = null;
-              return resolve({name:r.out_opp_name, av:r.out_opp_avatar,
+              return resolve(ugcOpp({name:r.out_opp_name, av:r.out_opp_avatar,
                               rating:r.out_opp_rating, id:r.out_opp_id,
-                              matchId:r.out_match_id, color:r.out_color});
+                              matchId:r.out_match_id, color:r.out_color}));
             }
           }catch(e){ console.error('pairing poll failed', e); }
           await wait(1800);
@@ -1261,7 +1389,7 @@ function makeSupabaseBackend(){
        id, so the entitlement row, rating and match history all carry over —
        nothing is migrated and nothing can be dropped on the way. */
     async linkEmail(email){
-      const {error} = await sb.auth.updateUser({email}, {emailRedirectTo: RETURN_URL});
+      const {error} = await sb.auth.updateUser({email}, {emailRedirectTo: EMAIL_RETURN_URL});
       if(error) throw error;
       return {sent:true};
     },
@@ -1272,7 +1400,7 @@ function makeSupabaseBackend(){
        depend on an email arriving, and the thing being recovered cost
        somebody $100. */
     async securePassword(email, password){
-      const {error} = await sb.auth.updateUser({email, password}, {emailRedirectTo: RETURN_URL});
+      const {error} = await sb.auth.updateUser({email, password}, {emailRedirectTo: EMAIL_RETURN_URL});
       if(error) throw error;
       return {sent:true};
     },
@@ -1296,7 +1424,7 @@ function makeSupabaseBackend(){
        the very same user id, so the warhead is simply there again. */
     async restoreAccount(email){
       const {error} = await sb.auth.signInWithOtp({
-        email, options:{shouldCreateUser:false, emailRedirectTo: RETURN_URL},
+        email, options:{shouldCreateUser:false, emailRedirectTo: EMAIL_RETURN_URL},
       });
       if(error) throw error;
       return {sent:true};
@@ -1322,7 +1450,7 @@ function makeSupabaseBackend(){
       if(error) throw error;
       const r = Array.isArray(data) ? data[0] : data;
       return r && r.out_id
-        ? {id:r.out_id, name:r.out_name, av:r.out_avatar, rating:r.out_rating}
+        ? ugcOpp({id:r.out_id, name:r.out_name, av:r.out_avatar, rating:r.out_rating})
         : null;
     },
 
@@ -1333,8 +1461,8 @@ function makeSupabaseBackend(){
       if(error) throw error;
       const r = Array.isArray(data) ? data[0] : data;
       return r && r.out_match_id
-        ? {matchId:r.out_match_id, color:r.out_color, id:r.out_opp_id,
-           name:r.out_opp_name, av:r.out_opp_avatar, rating:r.out_opp_rating}
+        ? ugcOpp({matchId:r.out_match_id, color:r.out_color, id:r.out_opp_id,
+           name:r.out_opp_name, av:r.out_opp_avatar, rating:r.out_opp_rating})
         : null;
     },
 
@@ -1669,6 +1797,7 @@ function fxLoop(now){
 }
 
 function redFlash(){
+  haptic();
   const f = $('#redflash');
   f.style.opacity = .9;
   setTimeout(()=> f.style.opacity = 0, 130);
@@ -2411,6 +2540,8 @@ function paintGameChrome(){
   syncCheck();
   setTurnLamps();
   updateNukeUI();
+  const rb = $('#btn-report');                 // exists only in the iOS app
+  if(rb) rb.style.display = (G.mode==='live' && G.opp && G.opp.id) ? '' : 'none';
   showScreen('#scr-game');
 }
 
@@ -2445,7 +2576,7 @@ function startGame(opts){
 
   paintGameChrome();
   feed(G.mode==='local' ? 'Pass &amp; Play — unrated bloodbath. White moves first.'
-       : `Match started vs <b>${G.opp.name}</b> (${G.opp.rating}). Rated. Good hunting.`, true);
+       : `Match started vs <b class="opp-nm">${esc(G.opp.name)}</b> (${esc(G.opp.rating)}). Rated. Good hunting.`, true);
   if(G.mode==='live') feed(`You are <b>${G.playerColor==='w'?'White':'Black'}</b> — a real opponent is on the other side.`, true);
   saveGame();
   startRelay();
@@ -2693,6 +2824,7 @@ async function endGame(resigned=false, nuked=false){
   else if(ch.in_threefold_repetition()) causeCode = 'repetition';
   else causeCode = 'fifty';
   let cause = CAUSE_TEXT[causeCode] || causeCode;
+  if(IOS_APP && nuked) cause = 'opponent ended the match';   // see concludeFromServer
 
   // dramatic finale: losing king dies on the board (a nuke already did that job)
   if(winner && nuked){
@@ -2701,6 +2833,7 @@ async function endGame(resigned=false, nuked=false){
     const loserKingSq = findKing(winner==='w' ? 'b' : 'w');
     const kEl = loserKingSq && G.pieces.get(loserKingSq);
     sfx.mate();
+    haptic('mate');
     banner(causeCode==='resign'    ? 'SURRENDER'
          : causeCode==='abandoned' ? 'WALKOVER'
          : causeCode==='checkmate' ? 'CHECKMATE' : 'GAME OVER');
@@ -2728,7 +2861,7 @@ async function endGame(resigned=false, nuked=false){
        live nuke arrives here too, and they have not won anything. */
     const mine = winner === G.playerColor;
     goRes.className = mine ? 'win' : 'loss';
-    goRes.textContent = mine ? 'VICTORY' : 'ANNIHILATED';
+    goRes.textContent = mine ? 'VICTORY' : IOS_TXT('ANNIHILATED', 'MATCH ENDED');
     if(mine) sfx.win(); else sfx.lose();
     $('#go-rating-row').style.display = 'none';
     $('#go-league').style.display = 'none';
@@ -2800,7 +2933,7 @@ async function endGame(resigned=false, nuked=false){
   }
   $('#go-cause').textContent = cause + (nuked ? ' · unrated' : '');
   $('#go-kills').textContent = nuked
-    ? `☠ ${G.kills} pieces vaporised — not counted toward your career`
+    ? `☠ ${G.kills} pieces ${IOS_TXT('vaporised', 'executed')} — not counted toward your career`
     : `☠ ${G.kills} pieces executed this game`;
   openOv('#ov-go');
   G.lastOpts = {mode:G.mode, playerColor:G.playerColor, opp:G.opp};
@@ -2837,6 +2970,10 @@ async function commitIdentity(){
       : 'Letters, numbers and underscores only.';
     return;
   }
+  if(IOS_APP && isOffensiveName(name)){
+    $('#ident-err').textContent = 'That name breaks the rules. Pick another.';
+    return;
+  }
   const prev = {username:P.username, avatar:P.avatar};
   P.username = name;
   P.avatar = ($('#ident-avs .av-opt.sel') || {dataset:{}}).dataset.av || DEFAULT_AV;
@@ -2854,6 +2991,7 @@ async function commitIdentity(){
     return;
   }
   go.disabled = false; go.textContent = label;
+  if(IOS_APP) acceptTerms();      // the name screen carries the Terms line (iOS app)
   closeOv('#ov-ident');
   sfx.promote();
   refreshHome();
@@ -2917,7 +3055,7 @@ function refreshStats(){
   }).join('');
   $('#hist-list').innerHTML = P.hist.length ? P.hist.map(h=>
     `<div class="hist-row"><span class="res ${h.res}">${h.res}</span>
-     <span>vs ${h.o} (${h.or})</span>
+     <span>vs ${esc(h.o)} (${esc(h.or)})</span>
      <span class="d ${h.d>=0?'delta up':'delta dn'}">${h.d>=0?'+':''}${h.d}</span></div>`).join('')
     : '<div style="color:var(--dim);font-style:italic">No games yet. Go spill something.</div>';
 }
@@ -3019,7 +3157,7 @@ function renderSearch(q){
   if(!q){ host.innerHTML = ''; return; }
   const hits = POOL.filter(p => p.u.toLowerCase().includes(q));
   host.innerHTML = hits.length ? hits.map(p=>playerCardHTML(p.u)).join('')
-    : `<div class="fr-empty">No players match “${q}”.</div>`;
+    : `<div class="fr-empty">No players match “${esc(q)}”.</div>`;
 }
 function refreshFriends(){
   const rc = $('#fr-req-cnt');
@@ -3078,6 +3216,157 @@ $('#btn-friends').onclick = ()=>{ sfx.ui(); $('#friend-search').value=''; render
 $('#btn-friends-back').onclick = ()=>{ sfx.ui(); showScreen('#scr-home'); };
 $('#btn-store').onclick = ()=>{ sfx.ui(); refreshStore(); refreshAccount(); openOv('#ov-store'); };
 
+/* ---- iOS app only: report / block a live opponent -------------------- */
+function blockOpp(id){
+  const ids = blockedIds();
+  if(!ids.includes(id)) ids.push(id);
+  try{ localStorage.setItem(BLOCK_KEY, JSON.stringify(ids)); }catch(e){}
+  if(G && G.opp && G.opp.id === id){          // repaint the opponent right away
+    G.opp = ugcOpp(G.opp);
+    $('#bar-top .av').textContent = G.opp.av;
+    $('#bar-top .nm').textContent = G.opp.name;
+    $$('#killfeed .opp-nm').forEach(e => e.textContent = G.opp.name);  // the "Match started vs …" line too
+    saveGame();
+  }
+  toast('Blocked. You won\'t see their name or get their invites again.');
+}
+function reportOpp(o){
+  const body = 'Player: ' + o.name + '\nPlayer ID: ' + o.id
+    + '\nMatch: ' + ((G && G.matchId) || '-') + '\n\nWhat happened:\n';
+  location.href = 'mailto:' + SUPPORT_EMAIL
+    + '?subject=' + encodeURIComponent('GoreChess player report: ' + o.name)
+    + '&body=' + encodeURIComponent(body);
+}
+function openOppCard(){
+  const o = G && G.opp;
+  if(!o || !o.id) return;
+  profileUser = null;                          // not a demo-network card
+  const el = (tag, cls, txt) => { const e = document.createElement(tag); e.className = cls; e.textContent = txt; return e; };
+  const acts = el('div', 'prof-actions', '');
+  const rep = el('button', 'go', '🚩 REPORT PLAYER');
+  rep.onclick = ()=>{ sfx.ui(); reportOpp(o); };
+  const blocked = isBlocked(o.id);
+  const blk = el('button', 'sbtn', blocked ? 'Blocked' : '⛔ Block player');
+  blk.style.fontSize = '15px';
+  blk.disabled = blocked;
+  blk.onclick = ()=>{ sfx.ui(); blockOpp(o.id); closeOv('#ov-profile'); };
+  acts.append(rep, blk);
+  $('#prof-body').replaceChildren(
+    el('div', 'prof-av', o.av), el('div', 'prof-name', o.name),
+    el('div', 'prof-league', 'Rating ' + o.rating),
+    el('div', 'prof-tag', 'Offensive name or abuse? Report it: we act on every report '
+      + 'within 24 hours and remove players who break the rules. Blocking hides this '
+      + 'player and their invites on this device. Contact: ' + SUPPORT_EMAIL),
+    acts);
+  openOv('#ov-profile');
+}
+
+/* ---- iOS app only: Terms of Use, agreed to before playing anyone -------
+   App Review's 1.2 checklist: users agree to terms that make clear there is
+   no tolerance for objectionable content or abusive users. The text lives in
+   the app so it reads the same with no network; the published copy is
+   android-assets/terms-of-use.md. Agreeing = claiming a handle, or the
+   one-time prompt before a first live match (agreeToTerms). */
+const TERMS_KEY = 'gorechess_terms', TERMS_VERSION = '2026-09-29';
+const TERMS = [
+  ['Adults only', 'GoreChess shows stylized violence with blood. You must be 18 or older to play.'],
+  ['Zero tolerance', 'There is no tolerance for objectionable content or abusive players. Your '
+    + 'handle must not contain slurs, hate, sexual content, threats, harassment or someone '
+    + 'else\'s identity. Do not harass, threaten or cheat other players.'],
+  ['What happens if you break these rules', 'Report a player with ⚑ Report during a live match, '
+    + 'or by email. We act on every report within 24 hours: offending handles are removed, and '
+    + 'players who break these rules are removed from the game, without notice.'],
+  ['Blocking', 'Block hides a player\'s name and their match invitations on this device.'],
+  ['Your account', 'You can delete your account at any time: home screen → 👤 Your account '
+    + '(or 🔒 Secure your account) → Delete my account.'],
+  ['The app', 'GoreChess is provided as is. Apple\'s standard Licensed Application End User '
+    + 'License Agreement also applies.'],
+  ['Contact', SUPPORT_EMAIL],
+];
+const termsAccepted = () => { try{ return localStorage.getItem(TERMS_KEY) === TERMS_VERSION; }catch(e){ return false; } };
+const acceptTerms   = () => { try{ localStorage.setItem(TERMS_KEY, TERMS_VERSION); }catch(e){} };
+async function agreeToTerms(){
+  if(!IOS_APP || termsAccepted()) return true;
+  const ok = await confirmDialog('Terms of Use',
+    'Live matches put you in front of real players. By continuing you agree to the Terms '
+    + 'of Use (linked at the bottom of the home screen): zero tolerance for offensive names '
+    + 'or abusive players, and offenders are removed.', 'I AGREE');
+  if(ok) acceptTerms();
+  return ok;
+}
+
+if(IOS_APP){
+  {
+    const el = (tag, cls, txt) => { const e = document.createElement(tag); if(cls) e.className = cls; if(txt) e.textContent = txt; return e; };
+    const ov = el('div', 'overlay'); ov.id = 'ov-terms';
+    const m = el('div', 'modal');
+    m.style.textAlign = 'left';
+    const h = el('h2', '', 'TERMS OF USE'); h.style.textAlign = 'center';
+    const sub = el('p', 'sub', 'Last updated 29 September 2026 · Spindola Software'); sub.style.textAlign = 'center';
+    m.append(h, sub);
+    for(const [head, body] of TERMS){
+      const p = el('p', 'prof-tag');
+      p.style.fontStyle = 'normal';
+      p.append(el('b', '', head + '. '), body);
+      m.append(p);
+    }
+    const close = el('button', 'linkish', 'close');
+    close.setAttribute('data-close', '');
+    const cw = el('div'); cw.style.textAlign = 'center'; cw.append(close);
+    m.append(cw);
+    ov.append(m);
+    document.body.append(ov);
+    const openTerms = ()=>{ sfx.ui(); openOv('#ov-terms'); };
+
+    const tf = el('button', '', 'Terms of Use');
+    tf.onclick = openTerms;
+    $('#foot-links').append(' · ', tf);
+
+    const it = el('div', 'ident-hint');
+    it.id = 'ident-terms';
+    it.style.margin = '8px 0 10px';
+    const tl = el('button', 'linkish', 'Terms of Use');
+    tl.style.margin = '0'; tl.style.fontSize = 'inherit';
+    tl.onclick = openTerms;
+    it.append('By entering you agree to the ', tl,
+      ': zero tolerance for offensive names or abusive players. Offenders are removed.');
+    $('#ident-go').before(it);
+  }
+
+  $('#foot-links').style.display = '';         // Privacy Policy · Support (· Terms, above)
+  $('#acct-privacy').style.display = '';       // App Store 5.1.1(i): policy linked in the app
+  $('#btn-store').style.display = 'none';      // no Black Market in the app (IOS_APP)
+  $('#btn-friends').style.display = 'none';    // demo network = placeholder content
+  $('#st-nukes').parentElement.style.display = 'none';
+  $('#acct-note').textContent = 'We\'ll email you a link to confirm the address. We never '
+    + 'post or share anything, and you keep the rating and record you already have.';
+  $('.ident-hint').textContent = '3–20 characters · letters, numbers and underscores · '
+    + 'no slurs or abuse: offending names are removed';
+
+  const rb = document.createElement('button');
+  rb.className = 'sbtn'; rb.id = 'btn-report'; rb.textContent = '⚑ Report';
+  rb.style.display = 'none';
+  $('#btn-resign').before(rb);
+  rb.onclick = ()=>{ sfx.ui(); openOppCard(); };
+
+  const ib = document.createElement('button');
+  ib.className = 'linkish'; ib.textContent = 'Block this player';
+  $('#ov-invite .modal').append(ib);
+  ib.onclick = ()=>{
+    const f = arenaWatch && arenaWatch.pending;
+    if(f) blockOpp(f.id);
+    $('#inv-no').onclick();
+  };
+
+  /* Confirming an email happens in Safari. Coming back to the app is the
+     moment to notice it, rather than at the next cold start. */
+  document.addEventListener('visibilitychange', async ()=>{
+    if(document.hidden || !ONLINE) return;
+    await refreshAccount();
+    if(ACCT.secured && $('#ov-account').classList.contains('on')) paintAccount();
+  });
+}
+
 /* =====================================================================
    ACCOUNT SECURITY
 
@@ -3097,7 +3386,14 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 async function refreshAccount(){
   try{ Object.assign(ACCT, await Backend.accountState()); }
   catch(e){ console.error('account state unavailable', e); }
-  $('#home-secure').classList.toggle('on', ONLINE && !ACCT.secured);
+  /* The only way into the account panel, so it stays once the account is
+     secured: "Delete my account" lives there and must be reachable for every
+     account (App Store 5.1.1(v), Play's account-deletion policy, and the
+     privacy policy's own instructions). */
+  $('#home-secure').classList.toggle('on', ONLINE);
+  $('#home-secure').textContent = ACCT.secured ? '👤 Your account'
+    : IOS_TXT('🔒 Secure your account — it only exists in this browser',
+              '🔒 Secure your account — it only exists on this device');
   $('#store-warn').classList.toggle('on', !ACCT.secured);
   return ACCT;
 }
@@ -3113,9 +3409,10 @@ function paintAccount(){
   pass.style.display               = showForm ? '' : 'none';
   go.style.display                 = showForm ? '' : 'none';
   go.disabled = false;
-  $('#acct-note').style.display    = mode === 'link' ? '' : 'none';
+  $('#acct-note').style.display    = (mode === 'link' && !secured) ? '' : 'none';
   $('#acct-switch').style.display  = (!secured && mode !== 'setpass') ? '' : 'none';
-  $('#acct-otp').style.display     = mode === 'restore' ? '' : 'none';
+  /* A one-tap link opens in Safari and signs Safari in, not the app. */
+  $('#acct-otp').style.display     = (mode === 'restore' && !IOS_APP) ? '' : 'none';
   $('#acct-setpass').style.display = (secured && mode !== 'setpass') ? '' : 'none';
   $('#acct-delete').style.display  = (ACCT.signedIn && mode !== 'setpass') ? '' : 'none';
   st.className = 'acct-state' + (secured && mode !== 'setpass' ? ' good' : '');
@@ -3133,30 +3430,39 @@ function paintAccount(){
 
   if(secured){
     $('#acct-title').textContent = '\u{1F512} ACCOUNT SECURED';
-    $('#acct-sub').textContent   = 'Nothing here can be lost by clearing your browser.';
+    $('#acct-sub').textContent   = IOS_TXT('Nothing here can be lost by clearing your browser.',
+                                           'Nothing here is lost if you lose this device.');
     st.textContent = '';
     const b = document.createElement('b');
     b.textContent = ACCT.email || '';
-    st.append('Signed in as ', b, '. Open GoreChess anywhere, sign in with that '
-      + 'address, and your rating and warheads come with you.');
+    st.append('Signed in as ', b, IOS_TXT('. Open GoreChess anywhere, sign in with that '
+      + 'address, and your rating and warheads come with you.',
+      '. Open GoreChess anywhere, sign in with that address and your password, '
+      + 'and your rating and record come with you.'));
     return;
   }
 
   if(mode === 'restore'){
     $('#acct-title').textContent = '↩ RESTORE YOUR ACCOUNT';
     $('#acct-sub').textContent   = 'Already secured one? Sign back into it.';
-    st.textContent = 'Enter the email and password you used. No password yet? Use '
-      + 'the one-tap link below, then set one from this panel.';
+    st.textContent = IOS_TXT('Enter the email and password you used. No password yet? Use '
+      + 'the one-tap link below, then set one from this panel.',
+      'Enter the email and password you used. Never set a password, or forgot it? '
+      + 'Sign in at gorechess.com with an emailed link, set one there, then sign in here.');
     pass.placeholder = 'your password';
     pass.autocomplete = 'current-password';
     go.textContent = 'SIGN IN';
     $('#acct-switch').textContent = 'Actually, secure this account instead';
   } else {
     $('#acct-title').textContent = '\u{1F512} SECURE YOUR ACCOUNT';
-    $('#acct-sub').textContent   = 'So a cleared browser can never cost you a warhead.';
-    st.textContent = 'This account exists only in this browser right now. Add an '
+    $('#acct-sub').textContent   = IOS_TXT('So a cleared browser can never cost you a warhead.',
+                                           'So your rating and record can never be lost.');
+    st.textContent = IOS_TXT('This account exists only in this browser right now. Add an '
       + 'email and a password and it becomes permanently yours — you keep the '
-      + 'rating, record and warheads you already have.';
+      + 'rating, record and warheads you already have.',
+      'This account exists only on this device right now. Add an email and a '
+      + 'password and it becomes permanently yours — you keep the rating and '
+      + 'record you already have.');
     pass.placeholder = 'choose a password (8+ characters)';
     pass.autocomplete = 'new-password';
     go.textContent = 'SECURE MY ACCOUNT';
@@ -3239,8 +3545,9 @@ $('#acct-otp').onclick = async function(){
 $('#acct-delete').onclick = async ()=>{
   sfx.ui();
   if(!await confirmDialog('Delete your account?',
-      'This erases your rating, your record and any warheads you own. Warheads '
-    + 'are not refunded. Games you have already played stay on record for your '
+      IOS_TXT('This erases your rating, your record and any warheads you own. Warheads '
+    + 'are not refunded. ', 'This erases your handle, your rating and your record. ')
+    + 'Games you have already played stay on record for your '
     + 'opponents, but nothing in them will point back to you.', 'CONTINUE')) return;
   if(!await confirmDialog('Last chance.',
       'This is permanent and immediate. There is no undo and no recovery, even '
@@ -3588,7 +3895,7 @@ async function arenaTick(){
   w.busy = true;
   try{
     const foe = await Backend.watchArena();
-    if(foe && arenaWatch === w && !w.declined.has(foe.id) && !inviteOpen) showInvite(foe);
+    if(foe && arenaWatch === w && !w.declined.has(foe.id) && !isBlocked(foe.id) && !inviteOpen) showInvite(foe);
   }catch(e){ console.warn('arena watch failed', e); }
   finally{ if(arenaWatch === w) w.busy = false; }
 }
@@ -3639,7 +3946,11 @@ $('#inv-yes').onclick = async function(){
   toast('Live match \u2014 good hunting.');
 };
 
-$('#btn-live').onclick = ()=>{ sfx.ui(); runMatchmaking(); };
+$('#btn-live').onclick = ()=>{
+  sfx.ui();
+  if(IOS_APP && !termsAccepted()) return void agreeToTerms().then(ok=>{ if(ok) runMatchmaking(); });
+  runMatchmaking();
+};
 $('#mm-cancel').onclick = ()=>{ sfx.ui(); if(mmAbort) mmAbort.abort(); closeOv('#ov-mm'); };
 
 /* =====================================================================
@@ -3766,7 +4077,13 @@ async function concludeFromServer(st){
   if(!G || G.over) return;
   stopRelay();
   G.serverEnd = st;
-  if(st.cause === 'nuke' && st.nukedBy && st.nukedBy !== P.id) await remoteNukeHit();
+  if(st.cause === 'nuke' && st.nukedBy && st.nukedBy !== P.id){
+    /* The iOS app never shows or names the item (IOS_APP): the match just
+       ends, unrated, and says so. IOS.md §6 has the server-side fix that
+       stops a web player spending it on an iOS player at all. */
+    if(IOS_APP) feed('Your opponent ended the match. Unrated.', true);
+    else await remoteNukeHit();
+  }
   endGame();
 }
 
@@ -3879,10 +4196,26 @@ if(typeof Chess === 'undefined'){
        drop to the local one — the game stays fully playable against bots
        rather than showing a dead screen because a CDN was unreachable. */
     let acct = null;
+    /* iOS app: an interrupted bot or Pass & Play game needs no server, so it
+       goes back on the board now; a live one waits for sign-in (below). */
+    if(IOS_APP){
+      try{
+        const saved = JSON.parse(localStorage.getItem('gorechess_game'));
+        if(saved && saved.mode !== 'live') restoreGame(saved);
+      }catch(e){ clearSavedGame(); }
+    }
     if(window.supabase && typeof window.supabase.createClient === 'function'){
       try{
-        Backend = makeSupabaseBackend();
-        acct = await Backend.signIn();
+        const sbB = makeSupabaseBackend();
+        if(IOS_APP){
+          /* Stays on Local until sign-in has actually worked, so a game that
+             ends meanwhile is never routed through a client stuck retrying. */
+          acct = await sbB.signInWithin(8000);
+          Backend = sbB;
+        } else {
+          Backend = sbB;
+          acct = await Backend.signIn();
+        }
       }catch(e){
         console.error('Supabase unavailable, falling back to local:', e);
         Backend = Local;
@@ -3915,6 +4248,9 @@ if(typeof Chess === 'undefined'){
       if(s.username && !/^player_[0-9a-f]{8}$/.test(s.username)) P.username = s.username;
       if(s.avatar) P.avatar = s.avatar;
     }
+    /* After the server's numbers, on purpose: the iOS app never unlocks a
+       nuke, whatever the account owns elsewhere (see IOS_APP). */
+    if(IOS_APP){ P.nukes = 0; P.nukeUnlocked = false; }
     P.id = acct.id;
     try{ localStorage.setItem('gorechess_profile', JSON.stringify(P)); }catch(e){}
 
@@ -3929,7 +4265,7 @@ if(typeof Chess === 'undefined'){
     // pick up a match that was interrupted by a refresh / closed tab
     try{
       const saved = JSON.parse(localStorage.getItem('gorechess_game'));
-      if(saved) restoreGame(saved);
+      if(saved && !(IOS_APP && saved.mode !== 'live')) restoreGame(saved);   // iOS: done above
     }catch(e){ clearSavedGame(); }
 
     refreshHome();
