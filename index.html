@@ -703,7 +703,7 @@
       <li>Against a <b>real opponent</b> it costs one charge. Each purchase is one charge.</li>
       <li>Nuke wins are <b>unrated</b> — your rating and body count are untouched.</li>
     </ul>
-    <div class="nuke-price">$100.00<small>USD · UNLOCKS BOT NUKES + 1 CHARGE</small></div>
+    <div class="nuke-price" id="store-price">$100.00<small>USD · UNLOCKS BOT NUKES + 1 CHARGE</small></div>
     <div class="nuke-owned" id="store-owned"></div>
     <div class="acct-warn" id="store-warn">
       <b>⚠ Secure your account first</b>
@@ -713,7 +713,7 @@
       it's yours permanently, on any device.
     </div>
     <button class="go" id="store-buy">PURCHASE — $100</button>
-    <div class="nuke-demo">Secure checkout by <b>Stripe</b> — we never see your card details. The warhead is credited to your account once payment clears, usually within a minute. Questions or trouble: <b>spindola.software@gmail.com</b></div>
+    <div class="nuke-demo" id="store-fine">Secure checkout by <b>Stripe</b> — we never see your card details. The warhead is credited to your account once payment clears, usually within a minute. Questions or trouble: <b>spindola.software@gmail.com</b></div>
     <button class="linkish" data-close>close</button>
   </div>
 </div>
@@ -1084,6 +1084,29 @@ async function playBillingService(){
   try{ return await window.getDigitalGoodsService(PLAY_BILLING); }
   catch(e){ return null; }        // web build, or billing genuinely unavailable
 }
+
+/* Purchase tokens being verified right now, by a purchase or by recovery, so
+   the two never verify and consume the same token at once. */
+const PLAY_INFLIGHT = new Set();
+
+/* Reads one play-verify answer ({status, body}; status 0 = never answered).
+   Only a definite answer from play-verify counts as a verdict; anything
+   else (gateway 401/404, 5xx, network) means "paid, not delivered yet". */
+function playOutcome(v){
+  const b = (v && v.body) || {};
+  if(v && v.status >= 200 && v.status < 300 && b.ok === true) return 'ok';
+  if(b.ok === false && b.reason === 'pending') return 'pending';
+  if(b.ok === false && (b.reason === 'invalid_purchase' || b.reason === 'cancelled')) return 'rejected';
+  return 'undelivered';
+}
+
+/* Consumable: each purchase is one charge, so Play must be told the item was
+   used or the player can never buy a second warhead. A failed consume is
+   retried by the next recovery pass, which play-verify answers idempotently. */
+async function playConsume(svc, purchaseToken){
+  try{ if(svc.consume) await svc.consume(purchaseToken); }
+  catch(e){ console.warn('consume failed', e); }
+}
 /* Where the confirmation / magic link drops the player back. Must also be on
    the Supabase project's redirect allow-list, or Supabase silently sends them
    to the project's Site URL instead — which is PoolTidy, not GoreChess. */
@@ -1223,58 +1246,122 @@ function makeSupabaseBackend(){
        floor if verification failed. Never acknowledging at all makes Play
        auto-refund the sale after three days. play-verify does the crediting
        and the acknowledge; the consume has to happen here because only the
-       client holds the Digital Goods service. */
+       client holds the Digital Goods service.
+
+       Once show() has handed back a token the player has PAID. From then on
+       no outcome may say "nothing was charged", and nothing is consumed
+       unless the server confirmed the credit. */
     async purchaseNukePlay(svc){
-      const before = (await B.entitlements()).nukes;
+      const held = P.nukes|0;           // failures report the balance we already had
 
       let details;
       try{ details = await svc.getDetails([PLAY_SKU]); }
-      catch(e){ console.error('getDetails failed', e); return {ok:false, nukes:before, reason:'error'}; }
-      if(!details || !details.length) return {ok:false, nukes:before, reason:'no such product'};
+      catch(e){ console.error('getDetails failed', e); return {ok:false, nukes:held, reason:'error'}; }
+      if(!details || !details.length) return {ok:false, nukes:held, reason:'no such product'};
 
+      /* Play ignores the total, but the constructor still validates it, and
+         a product without a backwards-compatible purchase option comes back
+         with an empty currency that would throw here. */
       const item = details[0];
+      const price = item.price && item.price.currency
+        ? {currency: item.price.currency, value: item.price.value} : {currency:'USD', value:'0'};
       const req = new PaymentRequest(
         [{supportedMethods: PLAY_BILLING, data:{sku: PLAY_SKU}}],
-        {total:{label: item.title || 'Tactical Nuke',
-                amount:{currency: item.price.currency, value: item.price.value}}});
+        {total:{label: item.title || 'Tactical Nuke', amount: price}});
 
       let resp;
       try{ resp = await req.show(); }
-      catch(e){ return {ok:false, nukes:before, reason:'cancelled'}; }
-
-      const purchaseToken = resp.details && resp.details.purchaseToken;
-      if(!purchaseToken){
-        try{ await resp.complete('fail'); }catch(e){}
-        return {ok:false, nukes:before, reason:'no token'};
+      catch(e){
+        /* Play refuses a new purchase ("already owned") while an earlier paid
+           one is still undelivered. That player has paid, so it is not a
+           cancel and must not be told nothing was charged. */
+        try{
+          const owned = await svc.listPurchases();
+          if((owned || []).some(p => p && p.itemId === PLAY_SKU)) return {ok:false, nukes:held, reason:'play_undelivered'};
+        }catch(e2){ console.warn('listPurchases failed', e2); }
+        return {ok:false, nukes:held, reason:'cancelled'};
       }
 
+      /* No token after a resolved sheet should not happen; if it does, the
+         purchase is still in Play's list and recovery picks it up. */
+      const purchaseToken = resp.details && (resp.details.purchaseToken || resp.details.token);
+      if(!purchaseToken){
+        try{ await resp.complete('unknown'); }catch(e){}
+        return {ok:false, nukes:held, reason:'play_undelivered'};
+      }
+
+      PLAY_INFLIGHT.add(purchaseToken);
       try{
-        const {data:{session}} = await sb.auth.getSession();
-        const r = await fetch(SUPABASE_URL + '/functions/v1/play-verify', {
-          method:'POST',
-          headers:{'content-type':'application/json', apikey: SUPABASE_KEY,
-                   authorization:'Bearer ' + (session ? session.access_token : '')},
-          body: JSON.stringify({productId: PLAY_SKU, purchaseToken}),
-        });
-        const body = await r.json().catch(()=>({}));
-        if(!r.ok || !body.ok){
-          try{ await resp.complete('fail'); }catch(e){}
-          return {ok:false, nukes:before, reason:'unverified'};
+        const v = await B.playVerify(purchaseToken);
+        const outcome = playOutcome(v);
+        if(outcome === 'ok'){
+          try{ await resp.complete('success'); }catch(e){}
+          await playConsume(svc, purchaseToken);
+          /* The server's answer carries the balance; re-read it only if not,
+             and never let that re-read turn a delivered warhead into an error. */
+          let {nukes, unlocked} = v.body;
+          if(typeof nukes !== 'number'){
+            try{ ({nukes, unlocked} = await B.entitlements()); }
+            catch(e){ console.warn('balance re-read failed', e); nukes = held; }
+          }
+          return {ok:true, nukes, unlocked, otherAccount: !!v.body.otherAccount};
         }
-        try{ await resp.complete('success'); }catch(e){}
-
-        /* Consumable: each purchase is one charge, so Play must be told the
-           item was used or the player can never buy a second warhead. */
-        try{ if(svc.consume) await svc.consume(purchaseToken); }
-        catch(e){ console.warn('consume failed', e); }
-
-        const e2 = await B.entitlements();
-        return {ok:true, nukes:e2.nukes, unlocked:e2.unlocked};
+        if(outcome === 'pending'){
+          // Paid by a slow method; Play itself completes or cancels it later.
+          try{ await resp.complete('success'); }catch(e){}
+          return {ok:false, nukes:held, reason:'play_pending'};
+        }
+        if(outcome === 'rejected'){
+          try{ await resp.complete('fail'); }catch(e){}
+          return {ok:false, nukes:held, reason:'play_rejected'};
+        }
+        try{ await resp.complete('unknown'); }catch(e){}
+        return {ok:false, nukes:held, reason:'play_undelivered'};
       }catch(e){
         console.error('play verify failed', e);
-        try{ await resp.complete('fail'); }catch(e2){}
-        return {ok:false, nukes:before, reason:'error'};
+        try{ await resp.complete('unknown'); }catch(e2){}
+        return {ok:false, nukes:held, reason:'play_undelivered'};
+      }finally{
+        PLAY_INFLIGHT.delete(purchaseToken);
       }
+    },
+
+    /* One purchase token to play-verify, which credits the warhead and
+       acknowledges the purchase. Up to three attempts, ~1 s then ~3 s apart,
+       on a network error, a timeout, a 5xx or a retryable answer; a 400/401
+       is final. "pending" is retryable for the server but final here: Play
+       will not clear it within seconds. Resolves {status, body}, never throws. */
+    async playVerify(purchaseToken){
+      const backoff = [1000, 3000];
+      let last = {status:0, body:{}};
+      for(let attempt = 0; attempt < 3; attempt++){
+        if(attempt) await wait(backoff[attempt - 1]);
+        const ctl = new AbortController();
+        const timer = setTimeout(()=> ctl.abort(), 15000);   // a hung call must not hang the store
+        let retry;
+        try{
+          const {data:{session}} = await sb.auth.getSession();   // fresh token every attempt
+          const r = await fetch(SUPABASE_URL + '/functions/v1/play-verify', {
+            method:'POST', signal: ctl.signal,
+            headers:{'content-type':'application/json', apikey: SUPABASE_KEY,
+                     authorization:'Bearer ' + (session ? session.access_token : '')},
+            body: JSON.stringify({productId: PLAY_SKU, purchaseToken}),
+          });
+          const body = await r.json().catch(()=> null);
+          last = {status: r.status, body: (body && typeof body === 'object') ? body : {}};
+          if(r.ok && last.body.ok === true) return last;
+          retry = r.status >= 500
+            || (body ? last.body.retryable === true && last.body.reason !== 'pending' : r.ok);
+        }catch(e){
+          console.warn('play-verify attempt', attempt + 1, 'failed:', e && e.name);
+          last = {status:0, body:{}};
+          retry = true;
+        }finally{
+          clearTimeout(timer);
+        }
+        if(!retry) return last;
+      }
+      return last;
     },
 
     async spendNuke({matchId, consume} = {}){
@@ -3214,7 +3301,15 @@ $('#btn-stats').onclick = ()=>{ sfx.ui(); refreshStats(); showScreen('#scr-stats
 $('#btn-stats-back').onclick = ()=>{ sfx.ui(); showScreen('#scr-home'); };
 $('#btn-friends').onclick = ()=>{ sfx.ui(); $('#friend-search').value=''; renderSearch(''); refreshFriends(); showScreen('#scr-friends'); };
 $('#btn-friends-back').onclick = ()=>{ sfx.ui(); showScreen('#scr-home'); };
-$('#btn-store').onclick = ()=>{ sfx.ui(); refreshStore(); refreshAccount(); openOv('#ov-store'); };
+$('#btn-store').onclick = ()=>{
+  sfx.ui(); refreshStore();
+  const acct = refreshAccount();
+  openOv('#ov-store');
+  /* Android: a paid-but-undelivered Play purchase gets another try every time
+     the store opens (recoverPlayPurchases). The web build has no service. */
+  if(ONLINE && !IOS_APP) Promise.all([acct, playBillingService()])
+    .then(([, svc])=>{ if(svc){ playStoreLabels(svc); recoverPlayPurchases(svc); } });
+};
 
 /* ---- iOS app only: report / block a live opponent -------------------- */
 function blockOpp(id){
@@ -3620,6 +3715,7 @@ $('#acct-go').onclick = async function(){
 
 $('#store-buy').onclick = async function(){
   if(this.disabled) return;
+  this.disabled = true;     // a second tap during the checks below must not start a second purchase
   sfx.ui();
 
   /* Do not sell a $100 item to an account that lives in one browser's
@@ -3629,6 +3725,7 @@ $('#store-buy').onclick = async function(){
      worse than not asking at all. */
   const acct = await refreshAccount();
   if(!acct.secured){
+    this.disabled = false;
     closeOv('#ov-store');
     openAccount('link');
     toast('Secure your account first — then the warhead is yours for good.');
@@ -3640,8 +3737,10 @@ $('#store-buy').onclick = async function(){
   const svc = await playBillingService();
 
   const label = this.textContent;
-  this.disabled = true;
   this.textContent = svc ? 'OPENING GOOGLE PLAY…' : 'WAITING FOR PAYMENT…';
+  /* Android: deliver any earlier paid-but-undelivered purchase first. While
+     one sits in Play's list, Play refuses a new purchase as "already owned". */
+  if(svc) await recoverPlayPurchases(svc);
   $('#store-owned').textContent = svc
     ? 'Confirm the purchase in the Google Play sheet.'
     : 'Finish checkout in the tab that just opened. This window will update by itself.';
@@ -3666,10 +3765,44 @@ $('#store-buy').onclick = async function(){
         'It usually appears within a minute; reopen this page to check. If it still is not here, ' +
         'email spindola.software@gmail.com with your receipt and we will sort it out.');
       toast('Payment not confirmed yet — see the note above.');
+    } else if(res.reason === 'play_pending'){
+      /* Google Play: these three come back only after the player paid (or
+         started paying), so none of them may claim nothing was charged. They
+         return before refreshStore(), which would wipe the note. */
+      storeNotice(
+        'Google Play is still processing your payment. Once it clears, reopen the Black Market and ' +
+        'the warhead is delivered. If the payment never clears, Google cancels it and nothing is charged.');
+      toast('Payment still processing — see the note above.');
+      return;
+    } else if(res.reason === 'play_rejected'){
+      storeNotice(
+        'Google Play did not confirm this purchase, so no warhead was delivered. ' +
+        'If you were charged, Google refunds it automatically.');
+      toast('Google Play did not confirm the purchase — see the note above.');
+      return;
+    } else if(res.reason === 'play_undelivered'){
+      storeNotice(
+        'Your payment reached Google Play, but delivery has not finished yet. It retries automatically ' +
+        'every time you reopen the Black Market. If it cannot be confirmed, Google refunds the purchase ' +
+        'automatically within 3 days. Questions: ' + SUPPORT_EMAIL);
+      toast('Payment received — delivery not finished yet. See the note above.');
+      return;
     } else {
       toast('Could not start checkout. Nothing was charged.');
     }
     refreshStore(); return;
+  }
+
+  /* Google Play only: the server already credited this purchase to a
+     different GoreChess account. It is still consumed, so it does not block
+     the next purchase; the warhead stays where it was credited. */
+  if(res.otherAccount){
+    if(typeof res.nukes === 'number'){ P.nukes = res.nukes; P.nukeUnlocked = !!res.unlocked; }
+    storeNotice(
+      'This Google Play purchase is already on another GoreChess account, so it was not added ' +
+      'to this one. Sign in to that account to use it. Questions: ' + SUPPORT_EMAIL);
+    toast('That purchase belongs to another GoreChess account.');
+    refreshHome(); updateNukeUI(); return;
   }
 
   P.nukes = res.nukes;              // the balance the backend believes in
@@ -3683,6 +3816,69 @@ $('#store-buy').onclick = async function(){
 function storeNotice(msg){
   const el = $('#store-owned');
   el.innerHTML = `<span style="color:var(--gold)">${msg}</span>`;
+}
+
+/* Android only. A Play purchase that was paid but never confirmed by
+   play-verify stays in Play's purchase list, unacknowledged, until Play
+   refunds it after three days, and while it sits there the next purchase
+   fails as "already owned". So every unconsumed "nuke" in the list is sent to
+   play-verify again, and consumed once the server confirms the credit.
+
+   Runs when the store opens and once at start-up. Only for a secured account:
+   after a reinstall the boot session is a fresh anonymous one, and crediting
+   the warhead to that would strand it where nobody can sign back in. Never
+   overlaps itself; silent on failure, because the next pass tries again. */
+/* Android: the Play build is paid through Google Play, not Stripe, and Play
+   charges the local price, so the store has to say both. The web and iOS
+   builds keep the markup as written. */
+async function playStoreLabels(svc){
+  $('#store-fine').innerHTML = 'Paid through <b>Google Play</b> with your Google account — we never see your ' +
+    'payment details. The warhead is credited once Google confirms the payment, usually within a minute. ' +
+    'Questions or trouble: <b>' + SUPPORT_EMAIL + '</b>';
+  try{
+    const [item] = await svc.getDetails([PLAY_SKU]);
+    const pr = item && item.price;
+    if(!pr || !pr.currency || !isFinite(Number(pr.value))) return;
+    const shown = new Intl.NumberFormat(undefined, {style:'currency', currency: pr.currency}).format(Number(pr.value));
+    $('#store-price').firstChild.textContent = shown;
+    $('#store-price small').textContent = pr.currency + ' · UNLOCKS BOT NUKES + 1 CHARGE';
+    if(!$('#store-buy').disabled) $('#store-buy').textContent = 'PURCHASE — ' + shown;   // not mid-purchase
+  }catch(e){ console.warn('play price lookup failed', e); }
+}
+
+let playRecovery = null;
+function recoverPlayPurchases(svc){
+  if(!svc || IOS_APP || !ONLINE || !ACCT.secured || typeof Backend.playVerify !== 'function') return Promise.resolve(null);
+  if(playRecovery) return playRecovery;
+  playRecovery = (async ()=>{
+    const list = await svc.listPurchases();
+    let landed = null, credited = false;
+    for(const p of list || []){
+      if(!p || p.itemId !== PLAY_SKU || !p.purchaseToken || PLAY_INFLIGHT.has(p.purchaseToken)) continue;
+      PLAY_INFLIGHT.add(p.purchaseToken);
+      try{
+        const v = await Backend.playVerify(p.purchaseToken);
+        if(playOutcome(v) !== 'ok'){
+          console.warn('play recovery: not delivered yet', v.status, v.body.reason || v.body.code || '');
+          continue;
+        }
+        await playConsume(svc, p.purchaseToken);
+        if(v.body.credited) credited = true;
+        if(typeof v.body.nukes === 'number') landed = v.body;
+      }finally{
+        PLAY_INFLIGHT.delete(p.purchaseToken);
+      }
+    }
+    if(landed){
+      P.nukes = landed.nukes;
+      P.nukeUnlocked = !!landed.unlocked;
+      refreshStore(); refreshHome(); updateNukeUI();
+      if(credited) toast('☢️ Your Google Play purchase landed. The warhead is armed.');
+    }
+    return landed;
+  })().catch(e=>{ console.warn('play recovery failed', e); return null; })
+    .finally(()=>{ playRecovery = null; });
+  return playRecovery;
 }
 $('#btn-nuke').onclick = ()=>{
   if(!G || G.over) return;
@@ -4261,6 +4457,9 @@ if(typeof Chess === 'undefined'){
       if(ACCT.secured) toast('Account secured — your purchases are safe now.');
       else toast('That link didn\'t complete. Try sending a fresh one.');
     }
+    /* Android: deliver any Play purchase that was paid but never confirmed
+       (recoverPlayPurchases). Not awaited: start-up does not wait on Play. */
+    if(ONLINE && !IOS_APP) playBillingService().then(svc => svc && recoverPlayPurchases(svc));
 
     // pick up a match that was interrupted by a refresh / closed tab
     try{
