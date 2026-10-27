@@ -756,7 +756,7 @@
 <div class="overlay" id="ov-store">
   <div class="modal store-modal">
     <h2>☢️ BLACK MARKET</h2>
-    <p class="sub">Buy once, armed forever against bots. Against a real opponent each purchase is one charge. Any match they are used in is unrated.</p>
+    <p class="sub">Every purchase is one charge against a real opponent. The nuke is unlimited against bots; the hellfire and the mortar come with five bot uses. Any match a weapon is fired in counts for half points.</p>
     <div class="acct-warn" id="store-warn">
       <b>⚠ Secure your account first</b>
       Right now this account exists only in this browser. Clearing your history,
@@ -769,7 +769,7 @@
       <div class="prod-ic">☢️</div>
       <div class="prod-body">
         <div class="prod-nm">Tactical Nuke <span class="prod-pr" data-price="nuke">$100</span></div>
-        <div class="prod-d">The enemy army is erased and the match ends in your favour. Instantly.</div>
+        <div class="prod-d">The enemy army is erased and the match ends in your favour. Instantly. Unlimited against bots, one charge against a real opponent.</div>
         <div class="prod-own" data-owned="nuke"></div>
       </div>
       <button class="go prod-buy" data-buy="nuke">PURCHASE — $100</button>
@@ -778,7 +778,7 @@
       <div class="prod-ic">🚀</div>
       <div class="prod-body">
         <div class="prod-nm">Hellfire Missile <span class="prod-pr" data-price="hellfire">$40</span></div>
-        <div class="prod-d">Pick a quadrant of the board. Every enemy piece in it dies, queens included — but it cannot kill a king. The game goes on.</div>
+        <div class="prod-d">Pick a quadrant of the board. Every enemy piece in it dies, queens included — but it cannot kill a king. The game goes on. Five bot uses and one live charge per purchase.</div>
         <div class="prod-own" data-owned="hellfire"></div>
       </div>
       <button class="go prod-buy" data-buy="hellfire">PURCHASE — $40</button>
@@ -787,7 +787,7 @@
       <div class="prod-ic">💣</div>
       <div class="prod-body">
         <div class="prod-nm">Mortar Strike <span class="prod-pr" data-price="mortar">$15</span></div>
-        <div class="prod-d">Pick a square. Three shells level the 3×3 around it. <b>Friendly fire is on</b>: your own pieces in the blast die too. It cannot kill kings or queens. Choose well.</div>
+        <div class="prod-d">Pick a square. Three shells level the 3×3 around it. <b>Friendly fire is on</b>: your own pieces in the blast die too. It cannot kill kings or queens. Five bot uses and one live charge per purchase.</div>
         <div class="prod-own" data-owned="mortar"></div>
       </div>
       <button class="go prod-buy" data-buy="mortar">PURCHASE — $15</button>
@@ -1056,7 +1056,7 @@ const Local = {
   /* becomes a select on gc_arsenal (the hellfire and the mortar, 007) */
   async arsenal(){
     const out = {};
-    for(const k of WEAPONS) out[k] = Object.assign({charges:0, used:0, unlocked:false}, P.arsenal && P.arsenal[k]);
+    for(const k of WEAPONS) out[k] = Object.assign({charges:0, botUses:0, used:0, unlocked:false}, P.arsenal && P.arsenal[k]);
     return out;
   },
 
@@ -1068,24 +1068,26 @@ const Local = {
       return {ok:r.ok, product, charges:r.nukes, unlocked:r.unlocked};
     }
     await wait(1500);
-    const a = Object.assign({charges:0, used:0, unlocked:false}, P.arsenal && P.arsenal[product]);
-    a.charges++; a.unlocked = true;
+    const a = Object.assign({charges:0, botUses:0, used:0, unlocked:false}, P.arsenal && P.arsenal[product]);
+    a.charges++; a.botUses += 5; a.unlocked = true;
     (P.arsenal = P.arsenal || {})[product] = a;
     await Local.saveProfile(P);
     return {ok:true, product, charges:a.charges, unlocked:true};
   },
   async purchasePlay(svc, product){ return Local.purchase(product); },
 
-  /* becomes the gc_spend_weapon() RPC: a real match consumes a charge, a bot
-     or couch game never does — and offline there is never a real match. */
+  /* becomes the gc_spend_weapon() RPC: a real match consumes a live charge,
+     a bot or couch game one of the five bot uses — and offline there is
+     never a real match. */
   async spendWeapon({product, matchId} = {}){
-    const a = Object.assign({charges:0, used:0, unlocked:false}, P.arsenal && P.arsenal[product]);
-    if(!a.unlocked) return {ok:false, charges:a.charges};
-    if(matchId){ if(a.charges <= 0) return {ok:false, charges:0}; a.charges--; }
+    const a = Object.assign({charges:0, botUses:0, used:0, unlocked:false}, P.arsenal && P.arsenal[product]);
+    if(!a.unlocked) return {ok:false, charges:a.charges, botUses:a.botUses};
+    if(matchId){ if(a.charges <= 0) return {ok:false, charges:0, botUses:a.botUses}; a.charges--; }
+    else { if(a.botUses <= 0) return {ok:false, charges:a.charges, botUses:0}; a.botUses--; }
     a.used++;
     (P.arsenal = P.arsenal || {})[product] = a;
     await Local.saveProfile(P);
-    return {ok:true, charges:a.charges};
+    return {ok:true, charges:a.charges, botUses:a.botUses};
   },
 
   /* NO PAYMENT PROCESSOR YET. Becomes Play Billing on Android and Stripe
@@ -1123,8 +1125,8 @@ const Local = {
   /* becomes the gc_apply_result() RPC. The Elo maths lives behind this seam
      precisely so the server can own it — a client that computes its own
      rating is a client that can award itself 3000. */
-  async applyResult({score, oppRating}){
-    const delta = eloDelta(P.rating, oppRating, score);
+  async applyResult({score, oppRating, weapon}){
+    const delta = Math.round(eloDelta(P.rating, oppRating, score) * (weapon ? .5 : 1));   // bought help counts for half
     P.rating = Math.max(100, P.rating + delta);
     P.games++;
     if(score===1) P.wins++; else if(score===0) P.losses++; else P.draws++;
@@ -1354,11 +1356,11 @@ function makeSupabaseBackend(){
     /* The two weapons (007): one gc_arsenal row per product the player has
        ever bought; a missing row is simply "never bought". */
     async arsenal(){
-      const {data, error} = await sb.from('gc_arsenal').select('product, charges, used, unlocked');
+      const {data, error} = await sb.from('gc_arsenal').select('product, charges, bot_uses, used, unlocked');
       if(error) throw error;
       const out = {};
-      for(const k of WEAPONS) out[k] = {charges:0, used:0, unlocked:false};
-      for(const r of data || []) if(out[r.product]) out[r.product] = {charges:r.charges|0, used:r.used|0, unlocked:!!r.unlocked};
+      for(const k of WEAPONS) out[k] = {charges:0, botUses:0, used:0, unlocked:false};
+      for(const r of data || []) if(out[r.product]) out[r.product] = {charges:r.charges|0, botUses:r.bot_uses|0, used:r.used|0, unlocked:!!r.unlocked};
       return out;
     },
 
@@ -1533,7 +1535,7 @@ function makeSupabaseBackend(){
       });
       if(error) throw error;
       const r = Array.isArray(data) ? data[0] : data;
-      return {ok: !!(r && r.ok), charges: r ? r.charges|0 : 0};
+      return {ok: !!(r && r.ok), charges: r ? r.charges|0 : 0, botUses: r ? r.bot_uses|0 : 0};
     },
 
     async spendNuke({matchId, consume} = {}){
@@ -1544,9 +1546,10 @@ function makeSupabaseBackend(){
       return {ok: !!r?.ok, nukes: r?.nukes ?? 0};
     },
 
-    async applyResult({score, oppRating, kills, oppName}){
+    async applyResult({score, oppRating, kills, oppName, weapon}){
       const {data, error} = await sb.rpc('gc_apply_result',
-        {p_score:score, p_opp_rating:oppRating|0, p_kills:kills|0, p_opp_name:oppName || null});
+        {p_score:score, p_opp_rating:oppRating|0, p_kills:kills|0, p_opp_name:oppName || null,
+         p_weapon: !!weapon});
       if(error) throw error;
       const r = Array.isArray(data) ? data[0] : data;
       return {rating:r.out_rating, games:r.out_games, wins:r.out_wins,
@@ -2937,16 +2940,18 @@ const canNuke = ()=> !!G && !G.over && !G.busy && nukeAvailable();
    HELLFIRE MISSILE + MORTAR STRIKE (007) — the two weapons that do not end
    the match. Bought in the Black Market like the nuke, fired from under the
    board at a target the player picks ON the board. A strike is a turn: it
-   has to be yours, and afterwards it is theirs. Any match a weapon is fired
-   in becomes unrated. Kings are immune to both, and the mortar also spares
-   queens, so a strike never ends the match by itself — only the chess that
-   follows can. The server records a live strike as a ply (gc_spend_weapon),
-   and the opponent's client replays it from the move stream.
+   has to be yours, and afterwards it is theirs. One purchase is five uses
+   against bots (or on the couch) and one charge against a real opponent;
+   any match a weapon is fired in — the nuke too — counts for half points.
+   Kings are immune to both, and the mortar also spares queens, so a strike
+   never ends the match by itself — only the chess that follows can. The
+   server records a live strike as a ply (gc_spend_weapon), and the
+   opponent's client replays it from the move stream.
 ===================================================================== */
-const arm = k => Object.assign({charges:0, used:0, unlocked:false}, P.arsenal && P.arsenal[k]);
+const arm = k => Object.assign({charges:0, botUses:0, used:0, unlocked:false}, P.arsenal && P.arsenal[k]);
 function setArm(k, patch){ (P.arsenal = P.arsenal || {})[k] = Object.assign(arm(k), patch); }
 const weaponCosts = () => !!G && !!G.matchId;          // the nuke's rule: a real match row costs
-const weaponAvailable = k => !!arm(k).unlocked && (!weaponCosts() || arm(k).charges > 0);
+const weaponAvailable = k => !!arm(k).unlocked && (weaponCosts() ? arm(k).charges > 0 : arm(k).botUses > 0);
 /* Unlike the nuke, a strike is a move, so the board has to be yours. */
 const canFire = k => !!G && !G.over && !G.busy && !IOS_APP && weaponAvailable(k)
   && (G.mode === 'local' || G.chess.turn() === G.playerColor);
@@ -3071,8 +3076,8 @@ function disarm(){
       : `No enemy piece is in ${where} right now.`;
     if(own.length) msg += ` Friendly fire: your ${list(own)}.`;
     msg += product === 'mortar' ? ' Friendly fire is on. Kings and queens cannot be killed.' : ' Kings cannot be killed; queens can.';
-    msg += weaponCosts() ? ' This spends one charge and takes your turn. The match becomes unrated.'
-                         : ' Free against bots. It takes your turn, and the game becomes unrated.';
+    msg += weaponCosts() ? ' This spends one live charge and takes your turn. The match counts for half points.'
+                         : ` This spends one of your ${arm(product).botUses} bot uses and takes your turn. The game counts for half points.`;
     if(!await confirmDialog(`${pr.icon} Fire the ${pr.name}?`, msg, 'FIRE')) return;
     if(!canFire(product)) return;
     sfx.ui();
@@ -3116,14 +3121,13 @@ async function fireWeapon(product, target, opt = {}){
       toast(arm(product).unlocked ? `No ${pr.name} charges left for a live opponent.` : `You do not own a ${pr.name}.`);
       return false;
     }
-    setArm(product, {charges: spend.charges, used: arm(product).used + 1});
+    setArm(product, {charges: spend.charges, botUses: spend.botUses, used: arm(product).used + 1});
     if(relay) relay.applied = Math.max(relay.applied, livePly() + 1);
     clearSavedGame();                 // a refresh mid-strike must not refund it
     gameToken++;                      // voids any bot move already queued
     refreshHome();
   }
-  G.rated = false;
-  G.weaponUsed = true;
+  G.weaponUsed = true;                 // half points from here on, whoever wins
 
   await strikeFX(product, target, victims, striker, remote);
 
@@ -3224,14 +3228,15 @@ function updateWeaponUI(){
       cnt.textContent = '✕';
       small.textContent = k === 'hellfire' ? 'Tap a quadrant of the board. Tap here to cancel.' : 'Tap the centre square. Tap here to cancel.';
     } else if(live && !weaponCosts()){
-      cnt.textContent = '∞';
-      small.textContent = G.mode !== 'local' && G.chess.turn() !== G.playerColor
-        ? 'Wait for your turn.' : 'Unlimited against bots. The game becomes unrated.';
+      cnt.textContent = '×' + a.botUses;
+      small.textContent = !a.botUses ? 'No bot uses left — each purchase gives five more.'
+        : G.mode !== 'local' && G.chess.turn() !== G.playerColor ? 'Wait for your turn.'
+        : `${a.botUses} bot use${a.botUses === 1 ? '' : 's'} left. The game counts for half points.`;
     } else {
       cnt.textContent = '×' + a.charges;
       small.textContent = a.charges
-        ? 'Spends one charge and your turn. The match becomes unrated.'
-        : 'No charges left — buy one to fire at a live opponent.';
+        ? 'Spends one live charge and your turn. The match counts for half points.'
+        : 'No live charges left — each purchase gives one.';
     }
   }
 }
@@ -3242,11 +3247,11 @@ function updateNukeUI(){
   b.disabled = !canNuke();
   if(live && !nukeCosts()){
     $('#nuke-count').textContent = '∞';
-    b.querySelector('small').textContent = 'Unlimited against bots. Wins are unrated.';
+    b.querySelector('small').textContent = 'Unlimited against bots. Wins count for half points.';
   } else {
     $('#nuke-count').textContent = '×' + n;
     b.querySelector('small').textContent = n
-      ? 'Spends one charge against a live opponent. Unrated.'
+      ? 'Spends one charge against a live opponent. Half points.'
       : 'No charges left — buy one to nuke a live opponent.';
   }
   updateWeaponUI();
@@ -3258,8 +3263,8 @@ async function launchNuke(){
   const costs = nukeCosts();
   const ok = await confirmDialog('Launch the nuke?',
     costs
-      ? 'This spends one of your charges — you are nuking a real opponent. The enemy army is erased and the match ends in your favour. The win is unrated.'
-      : 'The enemy army is erased and the match ends in your favour. Bot nukes are free and unlimited, and the win is unrated.',
+      ? 'This spends one of your charges — you are nuking a real opponent. The enemy army is erased and the match ends in your favour. The win counts for half points.'
+      : 'The enemy army is erased and the match ends in your favour. Bot nukes are free and unlimited, and the win counts for half points.',
     'LAUNCH');
   if(!ok || !canNuke()) return;
 
@@ -3440,26 +3445,7 @@ async function endGame(resigned=false, nuked=false){
   /* results + rating */
   const goRes = $('#go-result');
   let score = null;  // player score for elo
-  if((nuked || G.weaponUsed) && G.mode!=='local'){
-    /* A bought win never moves a rating, never counts as a game, and never
-       adds to the career body count — otherwise unlimited bot nukes would be
-       an unlimited kill farm. Note the player on the *receiving* end of a
-       live nuke arrives here too, and they have not won anything. A match
-       in which a hellfire or mortar was fired is the same, however it ends. */
-    const mine = winner === G.playerColor;
-    goRes.className = !winner ? 'draw' : mine ? 'win' : 'loss';
-    goRes.textContent = !winner ? 'DRAW' : mine ? 'VICTORY' : IOS_TXT('ANNIHILATED', 'MATCH ENDED');
-    if(winner){ if(mine) sfx.win(); else sfx.lose(); }
-    $('#go-rating-row').style.display = 'none';
-    $('#go-league').style.display = 'none';
-    $('#go-promo').style.display = 'none';
-    /* A nuke is finished by the server itself; a weapon match ends over the
-       board and still has to be closed there. Unrated by then: the call
-       records the result and moves nothing. */
-    if(!nuked && G.mode === 'live' && G.matchId){
-      try{ await Backend.finishMatch(G.matchId, winner || 'd', causeCode); }
-      catch(e){ console.error('could not close the match', e); }
-    }
+  if(false){   // weapon matches are rated at half now (007); nothing is unrated any more
   } else if(G.mode==='local'){
     goRes.className = winner ? 'win' : 'draw';
     goRes.textContent = winner ? (winner==='w'?'WHITE WINS':'BLACK WINS') : 'DRAW';
@@ -3492,7 +3478,8 @@ async function endGame(resigned=false, nuked=false){
           score  = scoreOf(winner);
         }
       } else {
-        res = await Backend.applyResult({score, oppRating:G.opp.rating, kills:myKills, oppName:G.opp.name});
+        res = await Backend.applyResult({score, oppRating:G.opp.rating, kills:myKills, oppName:G.opp.name,
+                                         weapon: !!(nuked || G.weaponUsed)});
       }
       if(res) Object.assign(P, {
         rating:res.rating, games:res.games, wins:res.wins, losses:res.losses,
@@ -3525,10 +3512,8 @@ async function endGame(resigned=false, nuked=false){
     saveProfile();
     refreshHome();
   }
-  $('#go-cause').textContent = cause + ((nuked || G.weaponUsed) ? ' · unrated' : '');
-  $('#go-kills').textContent = (nuked || G.weaponUsed)
-    ? `☠ ${G.kills} pieces ${IOS_TXT('vaporised', 'executed')} — not counted toward your career`
-    : `☠ ${G.kills} pieces executed this game`;
+  $('#go-cause').textContent = cause + ((nuked || G.weaponUsed) ? ' · half points (weapons used)' : '');
+  $('#go-kills').textContent = `☠ ${G.kills} pieces executed this game`;
   openOv('#ov-go');
   G.lastOpts = {mode:G.mode, playerColor:G.playerColor, opp:G.opp};
 }
@@ -3619,8 +3604,8 @@ function refreshHome(){
   fb.classList.toggle('on', SOC.incoming.length > 0);
   const owned = ['nuke', ...WEAPONS].filter(k => k === 'nuke' ? P.nukeUnlocked : arm(k).unlocked);
   $('#store-teaser').textContent = owned.length
-    ? 'Armed: ' + owned.map(k => PRODUCTS[k].name).join(', ') + '. Unlimited vs bots, charges vs humans.'
-    : `Nuke $${NUKE_PRICE_USD} · Hellfire $${PRODUCTS.hellfire.price} · Mortar $${PRODUCTS.mortar.price}. Buy once, armed forever vs bots.`;
+    ? 'Armed: ' + owned.map(k => PRODUCTS[k].name).join(', ') + '. Weapon games count for half points.'
+    : `Nuke $${NUKE_PRICE_USD} · Hellfire $${PRODUCTS.hellfire.price} · Mortar $${PRODUCTS.mortar.price}. Half points when used.`;
 }
 let STORE_PLAY = false;          // true once the Play Billing service has been seen
 const PLAY_PRICES = {};          // product -> localised price label from Play
@@ -3631,7 +3616,9 @@ function refreshStore(){
     const own = $(`[data-owned="${k}"]`);
     if(own){
       const used = a.used ? ` · ${a.used} fired to date` : '';
-      own.innerHTML = a.unlocked ? `Vs bots: <b>unlimited</b> · Live charges: <b>${a.charges}</b>${used}` : '';
+      own.innerHTML = !a.unlocked ? ''
+        : k === 'nuke' ? `Vs bots: <b>unlimited</b> · Live charges: <b>${a.charges}</b>${used}`
+        : `Bot uses: <b>${a.botUses}</b> · Live charges: <b>${a.charges}</b>${used}`;
     }
     const b = $(`[data-buy="${k}"]`);
     if(b && !b.dataset.busy){
@@ -4374,7 +4361,8 @@ async function buyProduct(product, btn){
   if(product === 'nuke'){ P.nukes = res.charges; P.nukeUnlocked = res.unlocked !== false; }
   else setArm(product, {charges: res.charges, unlocked: res.unlocked !== false});
   sfx.promote();
-  toast(`${pr.icon} Armed. Unlimited ${pr.name}s vs bots, plus one charge for a live opponent.`);
+  toast(product === 'nuke' ? '☢️ Armed. Unlimited bot nukes, plus one charge for a live opponent.'
+                           : `${pr.icon} Armed. Five bot uses, plus one charge for a live opponent.`);
   refreshStore(); refreshHome(); updateNukeUI();
 }
 $$('.prod-buy').forEach(b => b.onclick = ()=> buyProduct(b.dataset.buy, b));
