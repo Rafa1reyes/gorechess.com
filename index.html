@@ -599,8 +599,8 @@
       <div id="nuke-bar">
         <button id="btn-claim">🏳️ OPPONENT LEFT — CLAIM WIN<small>They haven't moved in over two minutes. Take the point.</small></button>
         <button id="btn-nuke">☢️ LAUNCH NUKE <span class="cnt" id="nuke-count">×1</span><small>Ends the match in your favour. One use — then it's gone.</small></button>
-        <button class="wpn" id="btn-hellfire">🚀 HELLFIRE MISSILE <span class="cnt" id="hellfire-count">×1</span><small>Pick a quadrant. Every enemy piece in it dies — the king excepted.</small></button>
-        <button class="wpn" id="btn-mortar">💣 MORTAR STRIKE <span class="cnt" id="mortar-count">×1</span><small>Pick a square. The 3×3 around it is levelled, friend or foe — kings and queens excepted.</small></button>
+        <button class="wpn" id="btn-hellfire">🚀 HELLFIRE MISSILE <span class="cnt" id="hellfire-count">×1</span><small>Pick a quadrant. Every enemy piece in it dies, queens included. Kings cannot be killed.</small></button>
+        <button class="wpn" id="btn-mortar">💣 MORTAR STRIKE <span class="cnt" id="mortar-count">×1</span><small>Pick a square. Everything in the 3×3 around it dies — FRIENDLY FIRE IS ON. Kings and queens cannot be killed.</small></button>
       </div>
     </div>
     <div class="side-panel">
@@ -778,7 +778,7 @@
       <div class="prod-ic">🚀</div>
       <div class="prod-body">
         <div class="prod-nm">Hellfire Missile <span class="prod-pr" data-price="hellfire">$40</span></div>
-        <div class="prod-d">Pick a quadrant of the board. Every enemy piece in it dies — except the king. The game goes on.</div>
+        <div class="prod-d">Pick a quadrant of the board. Every enemy piece in it dies, queens included — but it cannot kill a king. The game goes on.</div>
         <div class="prod-own" data-owned="hellfire"></div>
       </div>
       <button class="go prod-buy" data-buy="hellfire">PURCHASE — $40</button>
@@ -787,7 +787,7 @@
       <div class="prod-ic">💣</div>
       <div class="prod-body">
         <div class="prod-nm">Mortar Strike <span class="prod-pr" data-price="mortar">$15</span></div>
-        <div class="prod-d">Pick a square. Three shells level the 3×3 around it, friend or foe. Kings and queens are immune. Choose well.</div>
+        <div class="prod-d">Pick a square. Three shells level the 3×3 around it. <b>Friendly fire is on</b>: your own pieces in the blast die too. It cannot kill kings or queens. Choose well.</div>
         <div class="prod-own" data-owned="mortar"></div>
       </div>
       <button class="go prod-buy" data-buy="mortar">PURCHASE — $15</button>
@@ -3070,7 +3070,7 @@ function disarm(){
       ? `Kills ${foes.length} enemy piece${foes.length === 1 ? '' : 's'} in ${where}: ${list(foes)}.`
       : `No enemy piece is in ${where} right now.`;
     if(own.length) msg += ` Friendly fire: your ${list(own)}.`;
-    msg += product === 'mortar' ? ' Kings and queens are immune.' : ' Kings are immune.';
+    msg += product === 'mortar' ? ' Friendly fire is on. Kings and queens cannot be killed.' : ' Kings cannot be killed; queens can.';
     msg += weaponCosts() ? ' This spends one charge and takes your turn. The match becomes unrated.'
                          : ' Free against bots. It takes your turn, and the game becomes unrated.';
     if(!await confirmDialog(`${pr.icon} Fire the ${pr.name}?`, msg, 'FIRE')) return;
