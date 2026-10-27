@@ -599,8 +599,8 @@
       <div id="nuke-bar">
         <button id="btn-claim">🏳️ OPPONENT LEFT — CLAIM WIN<small>They haven't moved in over two minutes. Take the point.</small></button>
         <button id="btn-nuke">☢️ LAUNCH NUKE <span class="cnt" id="nuke-count">×1</span><small>Ends the match in your favour. One use — then it's gone.</small></button>
-        <button class="wpn" id="btn-hellfire">🚀 HELLFIRE MISSILE <span class="cnt" id="hellfire-count">×1</span><small>Pick a quadrant. Every enemy piece in it dies.</small></button>
-        <button class="wpn" id="btn-mortar">💣 MORTAR STRIKE <span class="cnt" id="mortar-count">×1</span><small>Pick a square. The 3×3 around it is levelled — friend or foe.</small></button>
+        <button class="wpn" id="btn-hellfire">🚀 HELLFIRE MISSILE <span class="cnt" id="hellfire-count">×1</span><small>Pick a quadrant. Every enemy piece in it dies — the king excepted.</small></button>
+        <button class="wpn" id="btn-mortar">💣 MORTAR STRIKE <span class="cnt" id="mortar-count">×1</span><small>Pick a square. The 3×3 around it is levelled, friend or foe — kings and queens excepted.</small></button>
       </div>
     </div>
     <div class="side-panel">
@@ -778,7 +778,7 @@
       <div class="prod-ic">🚀</div>
       <div class="prod-body">
         <div class="prod-nm">Hellfire Missile <span class="prod-pr" data-price="hellfire">$40</span></div>
-        <div class="prod-d">Pick a quadrant of the board. Every enemy piece in it dies. The game goes on.</div>
+        <div class="prod-d">Pick a quadrant of the board. Every enemy piece in it dies — except the king. The game goes on.</div>
         <div class="prod-own" data-owned="hellfire"></div>
       </div>
       <button class="go prod-buy" data-buy="hellfire">PURCHASE — $40</button>
@@ -787,7 +787,7 @@
       <div class="prod-ic">💣</div>
       <div class="prod-body">
         <div class="prod-nm">Mortar Strike <span class="prod-pr" data-price="mortar">$15</span></div>
-        <div class="prod-d">Pick a square. Three shells level the 3×3 around it — friend or foe. Choose well.</div>
+        <div class="prod-d">Pick a square. Three shells level the 3×3 around it, friend or foe. Kings and queens are immune. Choose well.</div>
         <div class="prod-own" data-owned="mortar"></div>
       </div>
       <button class="go prod-buy" data-buy="mortar">PURCHASE — $15</button>
@@ -1525,11 +1525,11 @@ function makeSupabaseBackend(){
        strike as our next ply in the same transaction; bots and couch games
        are free once unlocked. A thrown error means our board has drifted
        from the match, exactly like a rejected move. */
-    async spendWeapon({product, matchId, target, ply, fen, san, result} = {}){
+    async spendWeapon({product, matchId, target, ply, fen, san} = {}){
       const {data, error} = await sb.rpc('gc_spend_weapon', {
         p_product: product, p_match_id: matchId || null, p_target: target,
         p_ply: matchId ? ply : null, p_fen: matchId ? fen : null,
-        p_san: matchId ? san : null, p_result: matchId ? (result || null) : null,
+        p_san: matchId ? san : null,
       });
       if(error) throw error;
       const r = Array.isArray(data) ? data[0] : data;
@@ -2938,9 +2938,10 @@ const canNuke = ()=> !!G && !G.over && !G.busy && nukeAvailable();
    the match. Bought in the Black Market like the nuke, fired from under the
    board at a target the player picks ON the board. A strike is a turn: it
    has to be yours, and afterwards it is theirs. Any match a weapon is fired
-   in becomes unrated, and a strike that kills a king ends it (both kings:
-   a draw). The server records a live strike as a ply (gc_spend_weapon), and
-   the opponent's client replays it from the move stream (applyRemoteMove).
+   in becomes unrated. Kings are immune to both, and the mortar also spares
+   queens, so a strike never ends the match by itself — only the chess that
+   follows can. The server records a live strike as a ply (gc_spend_weapon),
+   and the opponent's client replays it from the move stream.
 ===================================================================== */
 const arm = k => Object.assign({charges:0, used:0, unlocked:false}, P.arsenal && P.arsenal[k]);
 function setArm(k, patch){ (P.arsenal = P.arsenal || {})[k] = Object.assign(arm(k), patch); }
@@ -2978,23 +2979,25 @@ function strikeVictims(product, target, striker){
   for(const sq of sqs){
     const q = G.chess.get(sq);
     if(!q) continue;
+    if(q.type === 'k') continue;                                   // kings are immune to both
+    if(product === 'mortar' && q.type === 'q') continue;           // and the mortar spares queens
     if(product === 'hellfire' && q.color === striker) continue;   // the missile knows its own
     out.push({sq, type:q.type, color:q.color});
   }
   return out;
 }
 /* The position after the strike: the victims gone, the turn passed, the
-   castling rights buried with the rook or king that carried them. */
+   castling rights buried with the rook that carried them. */
 function fenAfterStrike(victims, striker){
   const ch = new Chess(G.chess.fen());
   victims.forEach(v => ch.remove(v.sq));
   const parts = ch.fen().split(' ');
   const gone = new Set(victims.map(v => v.sq));
   let cast = parts[2];
-  if(gone.has('h1') || gone.has('e1')) cast = cast.replace('K', '');
-  if(gone.has('a1') || gone.has('e1')) cast = cast.replace('Q', '');
-  if(gone.has('h8') || gone.has('e8')) cast = cast.replace('k', '');
-  if(gone.has('a8') || gone.has('e8')) cast = cast.replace('q', '');
+  if(gone.has('h1')) cast = cast.replace('K', '');
+  if(gone.has('a1')) cast = cast.replace('Q', '');
+  if(gone.has('h8')) cast = cast.replace('k', '');
+  if(gone.has('a8')) cast = cast.replace('q', '');
   parts[1] = striker === 'w' ? 'b' : 'w';
   parts[2] = cast || '-';
   parts[3] = '-';
@@ -3067,8 +3070,7 @@ function disarm(){
       ? `Kills ${foes.length} enemy piece${foes.length === 1 ? '' : 's'} in ${where}: ${list(foes)}.`
       : `No enemy piece is in ${where} right now.`;
     if(own.length) msg += ` Friendly fire: your ${list(own)}.`;
-    if(foes.some(v => v.type === 'k')) msg += ' Their KING is in the blast — the match is yours.';
-    if(own.some(v => v.type === 'k')) msg += ' YOUR KING is in the blast — you would lose the match.';
+    msg += product === 'mortar' ? ' Kings and queens are immune.' : ' Kings are immune.';
     msg += weaponCosts() ? ' This spends one charge and takes your turn. The match becomes unrated.'
                          : ' Free against bots. It takes your turn, and the game becomes unrated.';
     if(!await confirmDialog(`${pr.icon} Fire the ${pr.name}?`, msg, 'FIRE')) return;
@@ -3084,12 +3086,8 @@ async function fireWeapon(product, target, opt = {}){
   const remote = !!opt.remote;
   const striker = remote ? (G.playerColor === 'w' ? 'b' : 'w')
                 : (G.mode === 'local' ? G.chess.turn() : G.playerColor);
-  const foe = striker === 'w' ? 'b' : 'w';
   const victims = strikeVictims(product, target, striker);
   const newFen = fenAfterStrike(victims, striker);
-  const foeKing = victims.some(v => v.type === 'k' && v.color === foe);
-  const ownKing = victims.some(v => v.type === 'k' && v.color === striker);
-  const result = foeKing && ownKing ? 'd' : foeKing ? striker : ownKing ? foe : null;
   const pr = PRODUCTS[product];
   const san = (product === 'hellfire' ? 'Hellfire ' : 'Mortar ') + target;   // no 'x': the server counts those as kills
 
@@ -3105,7 +3103,7 @@ async function fireWeapon(product, target, opt = {}){
     let spend;
     try{
       spend = await Backend.spendWeapon({product, matchId:G.matchId || null, target,
-        ply: livePly(), fen:newFen, san, result});
+        ply: livePly(), fen:newFen, san});
     }catch(e){
       console.error('strike refused by the server', e);
       G.busy = false; updateNukeUI();
@@ -3129,14 +3127,10 @@ async function fireWeapon(product, target, opt = {}){
 
   await strikeFX(product, target, victims, striker, remote);
 
-  if(result){
-    G.strikeEnd = {winner: result === 'd' ? null : result, cause: product};
-    G.busy = false;
-    endGame();
-    return true;
-  }
   /* The game goes on, one ply later. chess.js keeps no history across a
-     load, so the plies so far ride in plyBase — as a resync does. */
+     load, so the plies so far ride in plyBase — as a resync does. The
+     position left behind can still be mate or stalemate: that is chess
+     ending the game, and it ends it the usual way. */
   const plies = livePly() + 1;
   G.chess.load(newFen);
   G.plyBase = plies;
@@ -3145,7 +3139,8 @@ async function fireWeapon(product, target, opt = {}){
   syncPieces(); syncCheck(); setTurnLamps();
   G.busy = false;
   updateNukeUI();
-  saveGame(); maybeBotMove();
+  if(G.chess.game_over()) endGame();
+  else { saveGame(); maybeBotMove(); }
   return true;
 }
 
@@ -3383,7 +3378,6 @@ const CAUSE_TEXT = {
   resign:'by resignation', checkmate:'by checkmate', stalemate:'by stalemate',
   material:'insufficient material', repetition:'threefold repetition',
   fifty:'50-move rule', nuke:'by tactical nuke ☢',
-  hellfire:'by hellfire missile 🚀', mortar:'by mortar strike 💣',
   abandoned:'opponent left the arena',
 };
 
@@ -3409,14 +3403,12 @@ async function endGame(resigned=false, nuked=false){
     nuked = causeCode === 'nuke';
   }
   else if(nuked){ winner = G.nukeWinner; causeCode = 'nuke'; }
-  else if(G.strikeEnd){ winner = G.strikeEnd.winner; causeCode = G.strikeEnd.cause; }
   else if(resigned){ winner = G.mode==='local' ? (ch.turn()==='w'?'b':'w') : (G.playerColor==='w'?'b':'w'); causeCode = 'resign'; }
   else if(ch.in_checkmate()){ winner = ch.turn()==='w' ? 'b' : 'w'; causeCode = 'checkmate'; }
   else if(ch.in_stalemate()) causeCode = 'stalemate';
   else if(ch.insufficient_material()) causeCode = 'material';
   else if(ch.in_threefold_repetition()) causeCode = 'repetition';
   else causeCode = 'fifty';
-  nuked = nuked || causeCode === 'hellfire' || causeCode === 'mortar';   // a king killed by a bought strike: same ending as a nuke
   let cause = CAUSE_TEXT[causeCode] || causeCode;
   if(IOS_APP && nuked) cause = 'opponent ended the match';   // see concludeFromServer
 
@@ -3461,10 +3453,9 @@ async function endGame(resigned=false, nuked=false){
     $('#go-rating-row').style.display = 'none';
     $('#go-league').style.display = 'none';
     $('#go-promo').style.display = 'none';
-    /* A nuke, or a strike that killed a king, was finished by the server
-       itself; a weapon match that ended over the board still has to be
-       closed there. Unrated by then: the call records the result and moves
-       nothing. */
+    /* A nuke is finished by the server itself; a weapon match ends over the
+       board and still has to be closed there. Unrated by then: the call
+       records the result and moves nothing. */
     if(!nuked && G.mode === 'live' && G.matchId){
       try{ await Backend.finishMatch(G.matchId, winner || 'd', causeCode); }
       catch(e){ console.error('could not close the match', e); }
