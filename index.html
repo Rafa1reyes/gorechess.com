@@ -292,6 +292,24 @@
   .hist-row .res{font-weight:900; width:20px;}
   .res.W{color:#69c26b;} .res.L{color:var(--blood2);} .res.D{color:var(--dim);}
   .hist-row .d{margin-left:auto; font-weight:bold;}
+  /* leaderboard */
+  .lb-wrap{max-width:660px; margin:0 auto;}
+  .lb-head{text-align:center; margin:14px 0 16px;}
+  .lb-head .big-r{font-size:38px; font-weight:900; color:var(--bone); letter-spacing:2px;}
+  .lb-head .sub{color:var(--dim); font-size:13px; font-style:italic; margin-top:4px;}
+  .lb-row{display:flex; align-items:center; gap:10px; background:var(--panel); border:1px solid #382630; border-radius:10px; padding:9px 12px; margin-bottom:7px; font-size:14px;}
+  .lb-row.me{border-color:var(--gold); box-shadow:0 0 14px rgba(224,179,76,.2);}
+  .lb-row .rk{width:38px; flex:none; text-align:right; font-weight:900; color:var(--dim);}
+  .lb-row.top1 .rk{color:var(--gold);} .lb-row.top2 .rk{color:#d6d6d6;} .lb-row.top3 .rk{color:#c98a4b;}
+  .lb-row .av{font-size:22px; flex:none;}
+  .lb-row .nm{font-weight:bold; color:var(--bone); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .lb-row .you{flex:none; color:var(--gold); font-size:12px;}
+  .lb-row .lg{flex:none; font-size:16px;}
+  .lb-row .rt{margin-left:auto; flex:none; font-weight:900; font-size:17px; color:var(--bone);}
+  .lb-row .rec{flex:none; width:96px; text-align:right; color:var(--dim); font-size:12px;}
+  .lb-row .kl{flex:none; width:60px; text-align:right; color:var(--blood2); font-size:12px;}
+  .lb-gap{text-align:center; color:var(--dim); letter-spacing:6px; margin:2px 0 9px;}
+  .lb-note{color:var(--dim); font-style:italic; text-align:center; margin:14px 6px;}
   .center{text-align:center;}
 
   /* ---------- NUKE (bought in the black market, fired from under the board) ---------- */
@@ -394,6 +412,7 @@
     .promo-row .pic{width:42px; height:42px;}
     #go-result{font-size:32px;}
     #banner .btxt{font-size:40px;}
+    .lb-row .rec{display:none;} .lb-row .kl{width:52px;}
   }
 
   /* ---------- FRIENDS / SOCIAL ---------- */
@@ -495,6 +514,7 @@
     <button class="mbtn" id="btn-live"><span class="ic">⚔️</span><span><b>Live 1v1</b><span class="d">15s search for a live opponent near your rating. No one about? You get a bot. Rated either way.</span></span></button>
     <button class="mbtn" id="btn-local"><span class="ic">🪑</span><span><b>Pass &amp; Play</b><span class="d">Two players, one screen. Unrated carnage.</span></span></button>
     <button class="mbtn" id="btn-stats"><span class="ic">🏆</span><span><b>Career &amp; Leagues</b><span class="d">Your rating, league ladder, and body count.</span></span></button>
+    <button class="mbtn" id="btn-board"><span class="ic">🏅</span><span><b>Leaderboard</b><span class="d">The deadliest players on GoreChess, ranked by rating.</span></span></button>
     <button class="mbtn" id="btn-friends"><span class="ic">👥</span><span><b>Friends</b><span class="d">Add allies, answer requests, challenge them.</span></span><span class="mbtn-badge" id="friends-badge"></span></button>
     <button class="mbtn" id="btn-store"><span class="ic">☢️</span><span><b>Black Market</b><span class="d" id="store-teaser">Tactical nuke — $100. One shot, instant win, any match.</span></span></button>
     <button id="home-secure">🔒 Secure your account — it only exists in this browser</button>
@@ -579,6 +599,16 @@
   </div>
   <div class="lg-ladder" id="lg-ladder"></div>
   <div class="hist"><h3 style="color:var(--dim); letter-spacing:3px; font-size:13px; margin-bottom:10px;">RECENT GAMES</h3><div id="hist-list"></div></div>
+</div>
+
+<!-- ================= LEADERBOARD ================= -->
+<div class="scr" id="scr-board">
+  <div class="center" style="margin-top:10px"><button class="sbtn" id="btn-board-back">← Menu</button></div>
+  <div class="lb-wrap">
+    <div class="lb-head"><div class="big-r" id="lb-title">🏅 LEADERBOARD</div><div class="sub" id="lb-sub">Ranked by rating · rated games only</div></div>
+    <div id="lb-list"></div>
+    <div class="lb-note" id="lb-note"></div>
+  </div>
 </div>
 
 <!-- ================= FRIENDS ================= -->
@@ -1019,6 +1049,9 @@ const Local = {
     return {rating:P.rating, games:P.games, wins:P.wins, losses:P.losses,
             draws:P.draws, kills:P.kills, bestLeague:P.bestLeague|0, delta};
   },
+
+  /* Offline there is nobody to rank against; the screen says so. */
+  async leaderboard(){ return null; },
 
   /* Offline there is no arena to search, so nobody is ever found and every
      search runs the full countdown into a bot — see findLiveOpponent(). */
@@ -1551,6 +1584,23 @@ function makeSupabaseBackend(){
         ? ugcOpp({matchId:r.out_match_id, color:r.out_color, id:r.out_opp_id,
            name:r.out_opp_name, av:r.out_opp_avatar, rating:r.out_opp_rating})
         : null;
+    },
+
+    /* The top of the ladder, sized by the server — top 3, then 10, 50 and 100
+       as players join (backend/006_leaderboard.sql). The caller's own row
+       rides along flagged `me` even when it sits below the cut. Every handle
+       passes through ugcOpp like any other player the server names. */
+    async leaderboard(){
+      const {data, error} = await sb.rpc('gc_leaderboard');
+      if(error) throw error;
+      const raw = Array.isArray(data) ? data : [];
+      const rows = raw.map(r=>{
+        const o = ugcOpp({id:r.out_id, name:r.out_username, av:r.out_avatar, rating:r.out_rating});
+        return {rank:r.out_rank|0, id:o.id, name:o.name, av:o.av, rating:r.out_rating|0,
+                games:r.out_games|0, wins:r.out_wins|0, losses:r.out_losses|0,
+                draws:r.out_draws|0, kills:r.out_kills|0, me:!!r.out_me};
+      });
+      return {size: raw[0] ? raw[0].out_size|0 : 3, total: raw[0] ? raw[0].out_total|0 : 0, rows};
     },
 
     async leaveArena(){
@@ -3122,6 +3172,43 @@ function refreshStore(){
     ? `Bot nukes: <b>unlimited</b> · Live charges: <b>${n}</b>${used}`
     : 'You do not own a warhead yet.';
 }
+/* ---------------- leaderboard ---------------- */
+let LB_SEQ = 0;   // a load that finishes after a newer one started is dropped
+async function refreshBoard(){
+  const seq = ++LB_SEQ;
+  const list = $('#lb-list'), note = $('#lb-note');
+  $('#lb-title').textContent = '🏅 LEADERBOARD';
+  $('#lb-sub').textContent = 'Ranked by rating · rated games only';
+  list.innerHTML = ''; note.textContent = 'Loading…';
+  let lb = null, failed = false;
+  try{ lb = await Backend.leaderboard(); }
+  catch(e){ failed = true; console.error('leaderboard unavailable', e); }
+  if(seq !== LB_SEQ) return;
+  if(!lb){
+    note.textContent = failed ? 'The leaderboard could not be loaded. Check your connection and try again.'
+                              : 'The leaderboard needs a connection — you are playing offline.';
+    return;
+  }
+  const top = lb.rows.filter(r=>r.rank <= lb.size);
+  const me  = lb.rows.find(r=>r.me);
+  const row = r => {
+    const lg = LEAGUES[leagueIdx(r)];
+    return `<div class="lb-row${r.me?' me':''}${r.rank<=3?' top'+r.rank:''}">
+      <span class="rk">#${r.rank}</span><span class="av">${esc(r.av)}</span>
+      <span class="nm">${esc(r.name)}</span>${r.me?'<span class="you">(you)</span>':''}
+      <span class="lg" title="${lg.name} League">${lg.icon}</span>
+      <span class="rt">${r.rating}</span>
+      <span class="rec">${r.wins}W ${r.losses}L ${r.draws}D</span>
+      <span class="kl">${r.kills} ☠</span></div>`;
+  };
+  $('#lb-title').textContent = `🏅 TOP ${lb.size}`;
+  $('#lb-sub').textContent = `${lb.total} ranked player${lb.total===1?'':'s'} · rating, then wins, then kills · rated games only`;
+  list.innerHTML = top.map(row).join('')
+    + (me && me.rank > lb.size ? `<div class="lb-gap">···</div>${row(me)}` : '');
+  note.textContent = !top.length ? 'Nobody is ranked yet. Win a rated game and the board starts with you.'
+                   : !me ? 'Finish a rated game — vs Bot or Live 1v1 — to get ranked.' : '';
+}
+
 function refreshStats(){
   const li = leagueIdx(P);
   $('#st-badge').textContent = LEAGUES[li].icon;
@@ -3299,6 +3386,8 @@ $('#ov-profile').addEventListener('click', socialClick);
 $('#btn-bot').onclick = ()=>{ sfx.ui(); openOv('#ov-bot'); };
 $('#btn-stats').onclick = ()=>{ sfx.ui(); refreshStats(); showScreen('#scr-stats'); };
 $('#btn-stats-back').onclick = ()=>{ sfx.ui(); showScreen('#scr-home'); };
+$('#btn-board').onclick = ()=>{ sfx.ui(); showScreen('#scr-board'); refreshBoard(); };
+$('#btn-board-back').onclick = ()=>{ sfx.ui(); showScreen('#scr-home'); };
 $('#btn-friends').onclick = ()=>{ sfx.ui(); $('#friend-search').value=''; renderSearch(''); refreshFriends(); showScreen('#scr-friends'); };
 $('#btn-friends-back').onclick = ()=>{ sfx.ui(); showScreen('#scr-home'); };
 $('#btn-store').onclick = ()=>{
