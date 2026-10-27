@@ -314,16 +314,28 @@
 
   /* ---------- NUKE (bought in the black market, fired from under the board) ---------- */
   #nuke-bar{width:var(--bw); max-width:100%; margin:2px 0 8px;}
-  #btn-nuke{display:none; width:100%; padding:12px 16px; border-radius:11px; font-size:18px; letter-spacing:2px;
+  #btn-nuke, .wpn{display:none; width:100%; padding:12px 16px; border-radius:11px; font-size:18px; letter-spacing:2px;
     color:#ffe9b0; border:1px solid #8a5a12; text-align:center;
     background:linear-gradient(180deg,#5e3b08,#2a1904);
     box-shadow:0 0 0 1px #170f06, 0 6px 20px rgba(224,150,40,.20);
     animation:nukeGlow 2.2s infinite;}
-  #btn-nuke.on{display:block;}
-  #btn-nuke:hover:not(:disabled){border-color:var(--gold); color:#fff6da;}
-  #btn-nuke:disabled{opacity:.42; cursor:default; animation:none;}
-  #btn-nuke .cnt{color:var(--gold); font-weight:bold;}
-  #btn-nuke small{display:block; font-size:11.5px; letter-spacing:.4px; color:#c39a55; font-style:italic; margin-top:3px;}
+  .wpn{margin-top:8px; font-size:16px; letter-spacing:1.6px; padding:10px 14px;}
+  #btn-nuke.on, .wpn.on{display:block;}
+  #btn-nuke:hover:not(:disabled), .wpn:hover:not(:disabled){border-color:var(--gold); color:#fff6da;}
+  #btn-nuke:disabled, .wpn:disabled{opacity:.42; cursor:default; animation:none;}
+  .wpn.arming{border-color:var(--blood2); color:#fff; background:linear-gradient(180deg,#5c1119,#38090e); animation:none;}
+  #btn-nuke .cnt, .wpn .cnt{color:var(--gold); font-weight:bold;}
+  #btn-nuke small, .wpn small{display:block; font-size:11.5px; letter-spacing:.4px; color:#c39a55; font-style:italic; margin-top:3px;}
+  /* targeting layer (007): quadrants for the hellfire, a roving 3x3 for the mortar */
+  #target{position:absolute; inset:0; z-index:8; display:none; cursor:crosshair; overflow:hidden;}
+  #target.on{display:block;}
+  .tq{position:absolute; width:256px; height:256px; box-sizing:border-box; border:2px dashed rgba(255,120,60,.55);
+    background:rgba(217,38,50,.10); display:flex; align-items:center; justify-content:center;
+    font-size:15px; letter-spacing:3px; color:#ffd9b0; font-weight:bold; text-shadow:0 2px 6px #000;}
+  .tq:hover{background:rgba(255,80,40,.32); border-color:#ffb070; border-style:solid;}
+  .tm{position:absolute; width:192px; height:192px; box-sizing:border-box; pointer-events:none; display:none;
+    border:3px solid rgba(255,140,60,.9); background:rgba(217,38,50,.22); box-shadow:0 0 24px rgba(255,120,40,.5);}
+  .tm.on{display:block;}
   @keyframes nukeGlow{50%{box-shadow:0 0 0 1px #170f06, 0 6px 28px rgba(240,180,60,.48);}}
 
   /* shown only when a live opponent has gone quiet long enough to time out */
@@ -351,8 +363,17 @@
   .nuke-price small{display:block; font-size:11.5px; font-weight:normal; letter-spacing:2px; color:var(--dim);}
   .nuke-owned{color:var(--dim); font-size:13.5px; font-style:italic; margin:8px 0 14px;}
   .nuke-owned b{color:var(--gold); font-style:normal;}
-  #store-buy{border-color:#8a5a12; background:linear-gradient(180deg,#6b430a,#31200a); color:#ffe9b0;}
-  #store-buy:disabled{opacity:.55; cursor:default;}
+  .store-modal{max-width:560px;}
+  .prod{display:flex; gap:12px; align-items:center; text-align:left; background:var(--panel); border:1px solid #4a2f3a; border-radius:12px; padding:12px; margin:10px 0;}
+  .prod .prod-ic{font-size:36px; flex:none; filter:drop-shadow(0 0 10px rgba(240,180,60,.35));}
+  .prod .prod-body{flex:1; min-width:0;}
+  .prod .prod-nm{font-weight:bold; color:var(--bone); font-size:16px; display:flex; justify-content:space-between; gap:8px;}
+  .prod .prod-pr{color:var(--gold); font-weight:900; flex:none;}
+  .prod .prod-d{font-size:12.5px; color:var(--dim); line-height:1.4; margin-top:2px;}
+  .prod .prod-own{font-size:12px; color:#e6c98c; margin-top:4px;}
+  .prod-buy{border-color:#8a5a12; background:linear-gradient(180deg,#6b430a,#31200a); color:#ffe9b0; font-size:14px; padding:10px 14px; flex:none;}
+  .prod-buy:disabled{opacity:.55; cursor:default;}
+  @media (max-width:600px){ .prod{flex-wrap:wrap;} .prod-buy{width:100%;} }
 
   /* ---------- ACCOUNT SECURITY ---------- */
   .linkish.danger{color:#b8534a;}
@@ -537,6 +558,7 @@
       <div class="ars"><div class="pc">♔</div><div><div class="nm">King</div><div class="wp">Flintlock Pistol</div><div class="fl">One shot is all a king needs.</div></div></div>
     </div>
   </div>
+  <p class="foot" id="p2w-note">With the purchasable weapons, some people may call this a pay-to-win game, but I think you should be proud if they are used on you. It means that you are so good, someone will spend their hard-earned money just to try to beat you at a free board game.</p>
   <p class="foot">Stylized cartoon violence. GoreChess is a game — the pieces signed waivers.</p>
   <p class="foot-links" id="foot-links" style="display:none"><a href="https://gorechess.com/privacy.html" target="_blank" rel="noopener">Privacy Policy</a> · <a href="mailto:spindola.software@gmail.com?subject=GoreChess%20support">Support</a></p>
 </div>
@@ -563,6 +585,7 @@
               <div id="squares"></div>
               <canvas id="stains" width="512" height="512"></canvas>
               <div id="hints"></div>
+              <div id="target"></div>
               <div id="pieces"></div>
               <canvas id="fx" width="512" height="512"></canvas>
               <div id="redflash"></div>
@@ -576,6 +599,8 @@
       <div id="nuke-bar">
         <button id="btn-claim">🏳️ OPPONENT LEFT — CLAIM WIN<small>They haven't moved in over two minutes. Take the point.</small></button>
         <button id="btn-nuke">☢️ LAUNCH NUKE <span class="cnt" id="nuke-count">×1</span><small>Ends the match in your favour. One use — then it's gone.</small></button>
+        <button class="wpn" id="btn-hellfire">🚀 HELLFIRE MISSILE <span class="cnt" id="hellfire-count">×1</span><small>Pick a quadrant. Every enemy piece in it dies.</small></button>
+        <button class="wpn" id="btn-mortar">💣 MORTAR STRIKE <span class="cnt" id="mortar-count">×1</span><small>Pick a square. The 3×3 around it is levelled — friend or foe.</small></button>
       </div>
     </div>
     <div class="side-panel">
@@ -729,27 +754,45 @@
 </div>
 
 <div class="overlay" id="ov-store">
-  <div class="modal">
-    <h2>☢️ TACTICAL NUKE</h2>
-    <p class="sub">One warhead. One match. One button.</p>
-    <div class="nuke-art">☢️</div>
-    <ul class="nuke-spec">
-      <li>The enemy army is erased. The match ends. <b>You win, instantly.</b></li>
-      <li><b>Unlimited against bots, forever.</b> Buy once and every bot match has the button.</li>
-      <li>Against a <b>real opponent</b> it costs one charge. Each purchase is one charge.</li>
-      <li>Nuke wins are <b>unrated</b> — your rating and body count are untouched.</li>
-    </ul>
-    <div class="nuke-price" id="store-price">$100.00<small>USD · UNLOCKS BOT NUKES + 1 CHARGE</small></div>
-    <div class="nuke-owned" id="store-owned"></div>
+  <div class="modal store-modal">
+    <h2>☢️ BLACK MARKET</h2>
+    <p class="sub">Buy once, armed forever against bots. Against a real opponent each purchase is one charge. Any match they are used in is unrated.</p>
     <div class="acct-warn" id="store-warn">
       <b>⚠ Secure your account first</b>
       Right now this account exists only in this browser. Clearing your history,
-      using private browsing, or switching device would take the warhead with it —
-      and $100 is too much to leave sitting in browser storage. Add an email and
+      using private browsing, or switching device would take everything you buy
+      with it — too much to leave sitting in browser storage. Add an email and
       it's yours permanently, on any device.
     </div>
-    <button class="go" id="store-buy">PURCHASE — $100</button>
-    <div class="nuke-demo" id="store-fine">Secure checkout by <b>Stripe</b> — we never see your card details. The warhead is credited to your account once payment clears, usually within a minute. Questions or trouble: <b>spindola.software@gmail.com</b></div>
+    <div class="nuke-owned" id="store-owned"></div>
+    <div class="prod" data-product="nuke">
+      <div class="prod-ic">☢️</div>
+      <div class="prod-body">
+        <div class="prod-nm">Tactical Nuke <span class="prod-pr" data-price="nuke">$100</span></div>
+        <div class="prod-d">The enemy army is erased and the match ends in your favour. Instantly.</div>
+        <div class="prod-own" data-owned="nuke"></div>
+      </div>
+      <button class="go prod-buy" data-buy="nuke">PURCHASE — $100</button>
+    </div>
+    <div class="prod" data-product="hellfire">
+      <div class="prod-ic">🚀</div>
+      <div class="prod-body">
+        <div class="prod-nm">Hellfire Missile <span class="prod-pr" data-price="hellfire">$40</span></div>
+        <div class="prod-d">Pick a quadrant of the board. Every enemy piece in it dies. The game goes on.</div>
+        <div class="prod-own" data-owned="hellfire"></div>
+      </div>
+      <button class="go prod-buy" data-buy="hellfire">PURCHASE — $40</button>
+    </div>
+    <div class="prod" data-product="mortar">
+      <div class="prod-ic">💣</div>
+      <div class="prod-body">
+        <div class="prod-nm">Mortar Strike <span class="prod-pr" data-price="mortar">$15</span></div>
+        <div class="prod-d">Pick a square. Three shells level the 3×3 around it — friend or foe. Choose well.</div>
+        <div class="prod-own" data-owned="mortar"></div>
+      </div>
+      <button class="go prod-buy" data-buy="mortar">PURCHASE — $15</button>
+    </div>
+    <div class="nuke-demo" id="store-fine">Secure checkout by <b>Stripe</b> — we never see your card details. Your purchase is credited to your account once payment clears, usually within a minute. Questions or trouble: <b>spindola.software@gmail.com</b></div>
     <button class="linkish" data-close>close</button>
   </div>
 </div>
@@ -1007,7 +1050,42 @@ const Local = {
 
   /* becomes a select on gc_entitlements */
   async entitlements(){
-    return {nukes:P.nukes|0, nukesUsed:P.nukesUsed|0, unlocked:!!P.nukeUnlocked};
+    return {nukes:P.nukes|0, nukesUsed:P.nukesUsed|0, unlocked:!!P.nukeUnlocked, arsenal:await Local.arsenal()};
+  },
+
+  /* becomes a select on gc_arsenal (the hellfire and the mortar, 007) */
+  async arsenal(){
+    const out = {};
+    for(const k of WEAPONS) out[k] = Object.assign({charges:0, used:0, unlocked:false}, P.arsenal && P.arsenal[k]);
+    return out;
+  },
+
+  /* Offline there is no checkout; same shape as the real one so the store
+     does not care which backend answered. */
+  async purchase(product){
+    if(product === 'nuke'){
+      const r = await Local.purchaseNuke();
+      return {ok:r.ok, product, charges:r.nukes, unlocked:r.unlocked};
+    }
+    await wait(1500);
+    const a = Object.assign({charges:0, used:0, unlocked:false}, P.arsenal && P.arsenal[product]);
+    a.charges++; a.unlocked = true;
+    (P.arsenal = P.arsenal || {})[product] = a;
+    await Local.saveProfile(P);
+    return {ok:true, product, charges:a.charges, unlocked:true};
+  },
+  async purchasePlay(svc, product){ return Local.purchase(product); },
+
+  /* becomes the gc_spend_weapon() RPC: a real match consumes a charge, a bot
+     or couch game never does — and offline there is never a real match. */
+  async spendWeapon({product, matchId} = {}){
+    const a = Object.assign({charges:0, used:0, unlocked:false}, P.arsenal && P.arsenal[product]);
+    if(!a.unlocked) return {ok:false, charges:a.charges};
+    if(matchId){ if(a.charges <= 0) return {ok:false, charges:0}; a.charges--; }
+    a.used++;
+    (P.arsenal = P.arsenal || {})[product] = a;
+    await Local.saveProfile(P);
+    return {ok:true, charges:a.charges};
   },
 
   /* NO PAYMENT PROCESSOR YET. Becomes Play Billing on Android and Stripe
@@ -1105,6 +1183,21 @@ const Local = {
 const SUPABASE_URL  = 'https://nfvtxanvofquxfkunqbl.supabase.co';
 const SUPABASE_KEY  = 'sb_publishable_GgkdotLzv1NakqXwyoKYiw_WIF-cwTZ';
 const NUKE_PAY_LINK = 'https://buy.stripe.com/eVqcN5c8wdb5eWSa8S67S00';
+/* Hellfire Missile ($40) and Mortar Strike ($15) Payment Links — made in the
+   Stripe dashboard like the nuke's. Until a link exists the web store shows
+   that item as not on sale yet; the Android build sells it through Play
+   Billing regardless (in-app products 'hellfire' and 'mortar'). */
+const HELLFIRE_PAY_LINK = '';
+const MORTAR_PAY_LINK   = '';
+
+/* Everything the Black Market sells. `key` is the Play product id, the
+   gc_purchases.product value and, for the two weapons, the gc_arsenal row. */
+const PRODUCTS = {
+  nuke:     {key:'nuke',     name:'Tactical Nuke',    icon:'☢️', price:100, link:()=>NUKE_PAY_LINK},
+  hellfire: {key:'hellfire', name:'Hellfire Missile', icon:'🚀', price:40,  link:()=>HELLFIRE_PAY_LINK},
+  mortar:   {key:'mortar',   name:'Mortar Strike',    icon:'💣', price:15,  link:()=>MORTAR_PAY_LINK},
+};
+const WEAPONS = ['hellfire', 'mortar'];
 
 /* --- Google Play Billing -------------------------------------------------
    Play requires digital goods sold *inside the Android app* to go through
@@ -1255,28 +1348,49 @@ function makeSupabaseBackend(){
         .select('nukes, nukes_used, nuke_unlocked').maybeSingle();
       if(error) throw error;
       return {nukes:data?.nukes ?? 0, nukesUsed:data?.nukes_used ?? 0,
-              unlocked:!!data?.nuke_unlocked};
+              unlocked:!!data?.nuke_unlocked, arsenal:await B.arsenal()};
+    },
+
+    /* The two weapons (007): one gc_arsenal row per product the player has
+       ever bought; a missing row is simply "never bought". */
+    async arsenal(){
+      const {data, error} = await sb.from('gc_arsenal').select('product, charges, used, unlocked');
+      if(error) throw error;
+      const out = {};
+      for(const k of WEAPONS) out[k] = {charges:0, used:0, unlocked:false};
+      for(const r of data || []) if(out[r.product]) out[r.product] = {charges:r.charges|0, used:r.used|0, unlocked:!!r.unlocked};
+      return out;
     },
 
     /* Opens Stripe with the player id attached, then waits for the webhook to
        actually move the balance. A redirect back proves nothing about whether
        money changed hands, so nothing is credited locally. */
-    async purchaseNuke(){
+    async purchase(product){
+      const pr = PRODUCTS[product];
+      const link = pr && pr.link();
+      if(!link) return {ok:false, product, charges:0, reason:'unavailable'};
       const {data:{user}} = await sb.auth.getUser();
-      if(!user) return {ok:false, nukes:0};
-      const before = (await B.entitlements()).nukes;
-      const win = window.open(
-        `${NUKE_PAY_LINK}?client_reference_id=${encodeURIComponent(user.id)}`,
-        '_blank', 'noopener');
-      if(!win) return {ok:false, nukes:before, reason:'popup blocked'};
+      if(!user) return {ok:false, product, charges:0};
+      const bal = async ()=>{
+        const e = await B.entitlements();
+        return product === 'nuke' ? {charges:e.nukes, unlocked:e.unlocked} : e.arsenal[product];
+      };
+      const before = (await bal()).charges;
+      /* The webhook reads "<uuid>_<product>"; the nuke's link predates the
+         suffix and still sends the bare id. What is credited is decided by
+         what was PAID, so the suffix is a label, not a claim. */
+      const ref = product === 'nuke' ? user.id : user.id + '_' + product;
+      const win = window.open(`${link}?client_reference_id=${encodeURIComponent(ref)}`, '_blank', 'noopener');
+      if(!win) return {ok:false, product, charges:before, reason:'popup blocked'};
       const deadline = Date.now() + 120000;
       while(Date.now() < deadline){
         await wait(2500);
-        const e = await B.entitlements();
-        if(e.nukes > before) return {ok:true, nukes:e.nukes, unlocked:e.unlocked};
+        const b = await bal();
+        if(b.charges > before) return {ok:true, product, charges:b.charges, unlocked:b.unlocked};
       }
-      return {ok:false, nukes:before, reason:'timeout'};
+      return {ok:false, product, charges:before, reason:'timeout'};
     },
+    async purchaseNuke(){ const r = await B.purchase('nuke'); return {...r, nukes:r.charges}; },
 
     /* The Android path. The order here is not interchangeable:
          pay -> verify server-side (credits AND acknowledges) -> tell Play it
@@ -1290,13 +1404,14 @@ function makeSupabaseBackend(){
        Once show() has handed back a token the player has PAID. From then on
        no outcome may say "nothing was charged", and nothing is consumed
        unless the server confirmed the credit. */
-    async purchaseNukePlay(svc){
-      const held = P.nukes|0;           // failures report the balance we already had
+    async purchasePlay(svc, product){
+      const pr = PRODUCTS[product];
+      const held = product === 'nuke' ? P.nukes|0 : arm(product).charges;   // failures report the balance we already had
 
       let details;
-      try{ details = await svc.getDetails([PLAY_SKU]); }
-      catch(e){ console.error('getDetails failed', e); return {ok:false, nukes:held, reason:'error'}; }
-      if(!details || !details.length) return {ok:false, nukes:held, reason:'no such product'};
+      try{ details = await svc.getDetails([product]); }
+      catch(e){ console.error('getDetails failed', e); return {ok:false, product, charges:held, reason:'error'}; }
+      if(!details || !details.length) return {ok:false, product, charges:held, reason:'no such product'};
 
       /* Play ignores the total, but the constructor still validates it, and
          a product without a backwards-compatible purchase option comes back
@@ -1305,8 +1420,8 @@ function makeSupabaseBackend(){
       const price = item.price && item.price.currency
         ? {currency: item.price.currency, value: item.price.value} : {currency:'USD', value:'0'};
       const req = new PaymentRequest(
-        [{supportedMethods: PLAY_BILLING, data:{sku: PLAY_SKU}}],
-        {total:{label: item.title || 'Tactical Nuke', amount: price}});
+        [{supportedMethods: PLAY_BILLING, data:{sku: product}}],
+        {total:{label: item.title || pr.name, amount: price}});
 
       let resp;
       try{ resp = await req.show(); }
@@ -1316,9 +1431,9 @@ function makeSupabaseBackend(){
            cancel and must not be told nothing was charged. */
         try{
           const owned = await svc.listPurchases();
-          if((owned || []).some(p => p && p.itemId === PLAY_SKU)) return {ok:false, nukes:held, reason:'play_undelivered'};
+          if((owned || []).some(p => p && p.itemId === product)) return {ok:false, product, charges:held, reason:'play_undelivered'};
         }catch(e2){ console.warn('listPurchases failed', e2); }
-        return {ok:false, nukes:held, reason:'cancelled'};
+        return {ok:false, product, charges:held, reason:'cancelled'};
       }
 
       /* No token after a resolved sheet should not happen; if it does, the
@@ -1326,51 +1441,54 @@ function makeSupabaseBackend(){
       const purchaseToken = resp.details && (resp.details.purchaseToken || resp.details.token);
       if(!purchaseToken){
         try{ await resp.complete('unknown'); }catch(e){}
-        return {ok:false, nukes:held, reason:'play_undelivered'};
+        return {ok:false, product, charges:held, reason:'play_undelivered'};
       }
 
       PLAY_INFLIGHT.add(purchaseToken);
       try{
-        const v = await B.playVerify(purchaseToken);
+        const v = await B.playVerify(purchaseToken, product);
         const outcome = playOutcome(v);
         if(outcome === 'ok'){
           try{ await resp.complete('success'); }catch(e){}
           await playConsume(svc, purchaseToken);
           /* The server's answer carries the balance; re-read it only if not,
-             and never let that re-read turn a delivered warhead into an error. */
-          let {nukes, unlocked} = v.body;
-          if(typeof nukes !== 'number'){
-            try{ ({nukes, unlocked} = await B.entitlements()); }
-            catch(e){ console.warn('balance re-read failed', e); nukes = held; }
+             and never let that re-read turn a delivered item into an error. */
+          let {charges, unlocked} = v.body;
+          if(typeof charges !== 'number'){
+            try{
+              const e = await B.entitlements();
+              ({charges, unlocked} = product === 'nuke' ? {charges:e.nukes, unlocked:e.unlocked} : e.arsenal[product]);
+            }catch(e){ console.warn('balance re-read failed', e); charges = held; }
           }
-          return {ok:true, nukes, unlocked, otherAccount: !!v.body.otherAccount};
+          return {ok:true, product, charges, unlocked, otherAccount: !!v.body.otherAccount};
         }
         if(outcome === 'pending'){
           // Paid by a slow method; Play itself completes or cancels it later.
           try{ await resp.complete('success'); }catch(e){}
-          return {ok:false, nukes:held, reason:'play_pending'};
+          return {ok:false, product, charges:held, reason:'play_pending'};
         }
         if(outcome === 'rejected'){
           try{ await resp.complete('fail'); }catch(e){}
-          return {ok:false, nukes:held, reason:'play_rejected'};
+          return {ok:false, product, charges:held, reason:'play_rejected'};
         }
         try{ await resp.complete('unknown'); }catch(e){}
-        return {ok:false, nukes:held, reason:'play_undelivered'};
+        return {ok:false, product, charges:held, reason:'play_undelivered'};
       }catch(e){
         console.error('play verify failed', e);
         try{ await resp.complete('unknown'); }catch(e2){}
-        return {ok:false, nukes:held, reason:'play_undelivered'};
+        return {ok:false, product, charges:held, reason:'play_undelivered'};
       }finally{
         PLAY_INFLIGHT.delete(purchaseToken);
       }
     },
+    async purchaseNukePlay(svc){ const r = await B.purchasePlay(svc, 'nuke'); return {...r, nukes:r.charges}; },
 
     /* One purchase token to play-verify, which credits the warhead and
        acknowledges the purchase. Up to three attempts, ~1 s then ~3 s apart,
        on a network error, a timeout, a 5xx or a retryable answer; a 400/401
        is final. "pending" is retryable for the server but final here: Play
        will not clear it within seconds. Resolves {status, body}, never throws. */
-    async playVerify(purchaseToken){
+    async playVerify(purchaseToken, product='nuke'){
       const backoff = [1000, 3000];
       let last = {status:0, body:{}};
       for(let attempt = 0; attempt < 3; attempt++){
@@ -1384,7 +1502,7 @@ function makeSupabaseBackend(){
             method:'POST', signal: ctl.signal,
             headers:{'content-type':'application/json', apikey: SUPABASE_KEY,
                      authorization:'Bearer ' + (session ? session.access_token : '')},
-            body: JSON.stringify({productId: PLAY_SKU, purchaseToken}),
+            body: JSON.stringify({productId: product, purchaseToken}),
           });
           const body = await r.json().catch(()=> null);
           last = {status: r.status, body: (body && typeof body === 'object') ? body : {}};
@@ -1401,6 +1519,21 @@ function makeSupabaseBackend(){
         if(!retry) return last;
       }
       return last;
+    },
+
+    /* gc_spend_weapon (007): a real match row costs a charge and records the
+       strike as our next ply in the same transaction; bots and couch games
+       are free once unlocked. A thrown error means our board has drifted
+       from the match, exactly like a rejected move. */
+    async spendWeapon({product, matchId, target, ply, fen, san, result} = {}){
+      const {data, error} = await sb.rpc('gc_spend_weapon', {
+        p_product: product, p_match_id: matchId || null, p_target: target,
+        p_ply: matchId ? ply : null, p_fen: matchId ? fen : null,
+        p_san: matchId ? san : null, p_result: matchId ? (result || null) : null,
+      });
+      if(error) throw error;
+      const r = Array.isArray(data) ? data[0] : data;
+      return {ok: !!(r && r.ok), charges: r ? r.charges|0 : 0};
     },
 
     async spendNuke({matchId, consume} = {}){
@@ -2408,6 +2541,7 @@ const KILLS = {
 ===================================================================== */
 async function doMove(mv, opt={}){
   if(G.busy || G.over) return null;
+  disarm();
   const res = G.chess.move(mv);
   if(!res) return null;
   /* Send a live move the instant chess.js accepts it, without waiting for
@@ -2521,6 +2655,7 @@ function cancelDrag(){
 }
 bwrap.addEventListener('pointerdown', e=>{
   if(e.button > 0) return;
+  if(ARMING) return;                      // the targeting layer owns the board
   if(!myTurn()){
     // tapped while you can't move — point them at whose turn it actually is
     if(G && !G.over && !G.busy) nudgeTurn();
@@ -2690,6 +2825,7 @@ function paintGameChrome(){
 
 function startGame(opts){
   gameToken++;
+  disarm();
   cancelDrag();
   stopRelay();
   /* 'live' without a match id has nobody on the other end and no relay to
@@ -2733,7 +2869,7 @@ function saveGame(){
     localStorage.setItem('gorechess_game', JSON.stringify({
       v:1, mode:G.mode, playerColor:G.playerColor, opp:G.opp,
       matchId:G.matchId || null, plies:livePly(),
-      fen:G.chess.fen(), kills:G.kills,
+      fen:G.chess.fen(), kills:G.kills, weaponUsed:!!G.weaponUsed,
       morgueB:$('#bar-bottom .morgue').innerHTML, morgueT:$('#bar-top .morgue').innerHTML,
       feed:$('#killfeed').innerHTML, lastFrom:G.lastFrom, lastTo:G.lastTo,
     }));
@@ -2749,7 +2885,8 @@ function restoreGame(s){
   G = {
     chess, mode:s.mode, playerColor:s.playerColor||'w', opp:s.opp||null,
     matchId:s.matchId||null, plyBase:s.plies|0,
-    rated:s.mode!=='local', kills:s.kills||0, busy:false, over:false, sel:null,
+    rated:s.mode!=='local' && !s.weaponUsed, weaponUsed:!!s.weaponUsed,
+    kills:s.kills||0, busy:false, over:false, sel:null,
     lastFrom:s.lastFrom||null, lastTo:s.lastTo||null, pieces:new Map(),
   };
   G.orient = G.mode==='local' ? 'w' : G.playerColor;
@@ -2796,6 +2933,314 @@ const nukeCosts = () => !!G && !!G.matchId; // charges track the server rule: a 
 const nukeAvailable = () => !!P.nukeUnlocked && (!nukeCosts() || (P.nukes|0) > 0);
 const canNuke = ()=> !!G && !G.over && !G.busy && nukeAvailable();
 
+/* =====================================================================
+   HELLFIRE MISSILE + MORTAR STRIKE (007) — the two weapons that do not end
+   the match. Bought in the Black Market like the nuke, fired from under the
+   board at a target the player picks ON the board. A strike is a turn: it
+   has to be yours, and afterwards it is theirs. Any match a weapon is fired
+   in becomes unrated, and a strike that kills a king ends it (both kings:
+   a draw). The server records a live strike as a ply (gc_spend_weapon), and
+   the opponent's client replays it from the move stream (applyRemoteMove).
+===================================================================== */
+const arm = k => Object.assign({charges:0, used:0, unlocked:false}, P.arsenal && P.arsenal[k]);
+function setArm(k, patch){ (P.arsenal = P.arsenal || {})[k] = Object.assign(arm(k), patch); }
+const weaponCosts = () => !!G && !!G.matchId;          // the nuke's rule: a real match row costs
+const weaponAvailable = k => !!arm(k).unlocked && (!weaponCosts() || arm(k).charges > 0);
+/* Unlike the nuke, a strike is a move, so the board has to be yours. */
+const canFire = k => !!G && !G.over && !G.busy && !IOS_APP && weaponAvailable(k)
+  && (G.mode === 'local' || G.chess.turn() === G.playerColor);
+
+let ARMING = null;   // {product} while a target is being chosen
+
+/* Board-absolute quadrants, named by their lowest square; the labels the
+   player sees follow the board's orientation. */
+const QUADS = ['a5', 'e5', 'a1', 'e1'];
+function quadSquares(q){
+  const f0 = q[0] === 'a' ? 0 : 4, r0 = q[1] === '1' ? 0 : 4, out = [];
+  for(let f = f0; f < f0 + 4; f++) for(let r = r0; r < r0 + 4; r++) out.push(String.fromCharCode(97 + f) + (r + 1));
+  return out;
+}
+function blastSquares(sq){
+  const f = sq.charCodeAt(0) - 97, r = sq.charCodeAt(1) - 49, out = [];
+  for(let df = -1; df <= 1; df++) for(let dr = -1; dr <= 1; dr++){
+    const ff = f + df, rr = r + dr;
+    if(ff >= 0 && ff < 8 && rr >= 0 && rr < 8) out.push(String.fromCharCode(97 + ff) + (rr + 1));
+  }
+  return out;
+}
+function quadLabel(q){
+  const left = (q[0] === 'a') === (G.orient === 'w'), top = (q[1] === '5') === (G.orient === 'w');
+  return (top ? 'top' : 'bottom') + ' ' + (left ? 'left' : 'right');
+}
+function strikeVictims(product, target, striker){
+  const sqs = product === 'hellfire' ? quadSquares(target) : blastSquares(target);
+  const out = [];
+  for(const sq of sqs){
+    const q = G.chess.get(sq);
+    if(!q) continue;
+    if(product === 'hellfire' && q.color === striker) continue;   // the missile knows its own
+    out.push({sq, type:q.type, color:q.color});
+  }
+  return out;
+}
+/* The position after the strike: the victims gone, the turn passed, the
+   castling rights buried with the rook or king that carried them. */
+function fenAfterStrike(victims, striker){
+  const ch = new Chess(G.chess.fen());
+  victims.forEach(v => ch.remove(v.sq));
+  const parts = ch.fen().split(' ');
+  const gone = new Set(victims.map(v => v.sq));
+  let cast = parts[2];
+  if(gone.has('h1') || gone.has('e1')) cast = cast.replace('K', '');
+  if(gone.has('a1') || gone.has('e1')) cast = cast.replace('Q', '');
+  if(gone.has('h8') || gone.has('e8')) cast = cast.replace('k', '');
+  if(gone.has('a8') || gone.has('e8')) cast = cast.replace('q', '');
+  parts[1] = striker === 'w' ? 'b' : 'w';
+  parts[2] = cast || '-';
+  parts[3] = '-';
+  parts[4] = String((parseInt(parts[4], 10) || 0) + 1);
+  if(striker === 'b') parts[5] = String((parseInt(parts[5], 10) || 1) + 1);
+  return parts.join(' ');
+}
+
+/* ---- targeting: the weapon button arms, the board picks ---- */
+function armWeapon(product){
+  if(ARMING && ARMING.product === product) return disarm();
+  if(!canFire(product)) return;
+  disarm();
+  cancelDrag(); clearHints();
+  ARMING = {product};
+  const host = $('#target');
+  host.innerHTML = '';
+  if(product === 'hellfire'){
+    for(const q of QUADS){
+      const d = document.createElement('div');
+      d.className = 'tq'; d.dataset.q = q;
+      const pts = quadSquares(q).map(sqXY);
+      d.style.left = Math.min(...pts.map(p => p.x)) + 'px';
+      d.style.top  = Math.min(...pts.map(p => p.y)) + 'px';
+      d.textContent = quadLabel(q).toUpperCase();
+      host.appendChild(d);
+    }
+  } else {
+    const m = document.createElement('div'); m.className = 'tm'; host.appendChild(m);
+  }
+  host.classList.add('on');
+  feed(product === 'hellfire' ? '🚀 Hellfire armed — pick a quadrant.' : '💣 Mortar armed — pick the centre square.', true);
+  updateNukeUI();
+}
+function disarm(){
+  if(!ARMING) return;
+  ARMING = null;
+  const host = $('#target');
+  host.classList.remove('on'); host.innerHTML = '';
+  updateNukeUI();
+}
+(()=>{
+  const host = $('#target');
+  host.addEventListener('pointermove', e=>{
+    if(!ARMING || ARMING.product !== 'mortar') return;
+    const m = host.querySelector('.tm'); if(!m) return;
+    const p = boardPt(e), sq = ptToSq(p.x, p.y);
+    if(!sq){ m.classList.remove('on'); return; }
+    const c = sqXY(sq);
+    m.style.left = (c.x - S) + 'px'; m.style.top = (c.y - S) + 'px';
+    m.classList.add('on');
+  });
+  host.addEventListener('pointerdown', async e=>{
+    e.stopPropagation(); e.preventDefault();
+    if(!ARMING) return;
+    const product = ARMING.product;
+    let target = null;
+    if(product === 'hellfire'){ const tq = e.target.closest('.tq'); target = tq && tq.dataset.q; }
+    else { const p = boardPt(e); target = ptToSq(p.x, p.y); }
+    if(!target) return;
+    disarm();
+    if(!canFire(product)) return;
+    const striker = G.mode === 'local' ? G.chess.turn() : G.playerColor;
+    const victims = strikeVictims(product, target, striker);
+    const foes = victims.filter(v => v.color !== striker), own = victims.filter(v => v.color === striker);
+    const list = a => a.map(v => NAME[v.type]).join(', ');
+    const pr = PRODUCTS[product];
+    const where = product === 'hellfire' ? 'the ' + quadLabel(target) + ' quadrant' : 'the 3×3 around ' + target;
+    let msg = foes.length
+      ? `Kills ${foes.length} enemy piece${foes.length === 1 ? '' : 's'} in ${where}: ${list(foes)}.`
+      : `No enemy piece is in ${where} right now.`;
+    if(own.length) msg += ` Friendly fire: your ${list(own)}.`;
+    if(foes.some(v => v.type === 'k')) msg += ' Their KING is in the blast — the match is yours.';
+    if(own.some(v => v.type === 'k')) msg += ' YOUR KING is in the blast — you would lose the match.';
+    msg += weaponCosts() ? ' This spends one charge and takes your turn. The match becomes unrated.'
+                         : ' Free against bots. It takes your turn, and the game becomes unrated.';
+    if(!await confirmDialog(`${pr.icon} Fire the ${pr.name}?`, msg, 'FIRE')) return;
+    if(!canFire(product)) return;
+    sfx.ui();
+    fireWeapon(product, target);
+  });
+})();
+
+/* ---- the strike: ours (spend first, then theatre) or theirs (theatre) ---- */
+async function fireWeapon(product, target, opt = {}){
+  if(!G || G.over) return false;
+  const remote = !!opt.remote;
+  const striker = remote ? (G.playerColor === 'w' ? 'b' : 'w')
+                : (G.mode === 'local' ? G.chess.turn() : G.playerColor);
+  const foe = striker === 'w' ? 'b' : 'w';
+  const victims = strikeVictims(product, target, striker);
+  const newFen = fenAfterStrike(victims, striker);
+  const foeKing = victims.some(v => v.type === 'k' && v.color === foe);
+  const ownKing = victims.some(v => v.type === 'k' && v.color === striker);
+  const result = foeKing && ownKing ? 'd' : foeKing ? striker : ownKing ? foe : null;
+  const pr = PRODUCTS[product];
+  const san = (product === 'hellfire' ? 'Hellfire ' : 'Mortar ') + target;   // no 'x': the server counts those as kills
+
+  disarm();
+  G.busy = true;
+  updateNukeUI();
+  cancelDrag(); clearHints();
+  if(!remote){
+    /* Lock the board before spending so a double-tap can't get two strikes
+       in flight, then let the backend decide whether the charge is there.
+       Against a real opponent the server also records the strike as our
+       ply, in the same transaction, so there is nothing left to relay. */
+    let spend;
+    try{
+      spend = await Backend.spendWeapon({product, matchId:G.matchId || null, target,
+        ply: livePly(), fen:newFen, san, result});
+    }catch(e){
+      console.error('strike refused by the server', e);
+      G.busy = false; updateNukeUI();
+      toast('Out of sync with your opponent — resyncing.');
+      resyncFromServer();
+      return false;
+    }
+    if(!spend.ok){
+      G.busy = false; updateNukeUI();
+      toast(arm(product).unlocked ? `No ${pr.name} charges left for a live opponent.` : `You do not own a ${pr.name}.`);
+      return false;
+    }
+    setArm(product, {charges: spend.charges, used: arm(product).used + 1});
+    if(relay) relay.applied = Math.max(relay.applied, livePly() + 1);
+    clearSavedGame();                 // a refresh mid-strike must not refund it
+    gameToken++;                      // voids any bot move already queued
+    refreshHome();
+  }
+  G.rated = false;
+  G.weaponUsed = true;
+
+  await strikeFX(product, target, victims, striker, remote);
+
+  if(result){
+    G.strikeEnd = {winner: result === 'd' ? null : result, cause: product};
+    G.busy = false;
+    endGame();
+    return true;
+  }
+  /* The game goes on, one ply later. chess.js keeps no history across a
+     load, so the plies so far ride in plyBase — as a resync does. */
+  const plies = livePly() + 1;
+  G.chess.load(newFen);
+  G.plyBase = plies;
+  $$('.sq.lastmove').forEach(sq => sq.classList.remove('lastmove'));
+  G.lastFrom = null; G.lastTo = null;
+  syncPieces(); syncCheck(); setTurnLamps();
+  G.busy = false;
+  updateNukeUI();
+  saveGame(); maybeBotMove();
+  return true;
+}
+
+async function strikeFX(product, target, victims, striker, remote){
+  const pr = PRODUCTS[product];
+  const mine = !remote && G.mode !== 'local';
+  const who = remote ? 'Your opponent' : G.mode === 'local' ? (striker === 'w' ? 'White' : 'Black') : 'You';
+  const sqs = product === 'hellfire' ? quadSquares(target) : blastSquares(target);
+  const pts = sqs.map(ctr);
+  const cx = pts.reduce((a, p) => a + p.x, 0) / pts.length, cy = pts.reduce((a, p) => a + p.y, 0) / pts.length;
+
+  if(product === 'hellfire'){
+    feed(`🚀 <b>${IOS_TXT(mine ? 'HELLFIRE' : 'INBOUND HELLFIRE', 'INCOMING FIRE')}</b> — ${who} ${mine ? 'fire' : 'fires'} on the ${quadLabel(target)} quadrant.`, true);
+    banner(mine ? 'HELLFIRE' : 'INCOMING');
+    for(let i = 0; i < 2; i++) tone({f0:620, f1:380, dur:.3, type:'sawtooth', vol:.13, delay:i * .32});
+    await wait(700);
+    sfx.rocket();
+    await FX.rocket(cx + rnd(-140, 140), -90, cx, cy, 700);
+    sfx.boom();
+    FX.shake = 26;
+    redFlash();
+    FX.fire(cx, cy, 60); FX.smoke(cx, cy, 36, .5); FX.blood(cx, cy, 24, 5);
+    pts.forEach((p, i) => { if(i % 3 === 0) stainScorch(p.x + rnd(-10, 10), p.y + rnd(-10, 10)); });
+    FX.ring(cx, cy);
+    await wait(180);
+  } else {
+    feed(`💣 <b>${IOS_TXT(mine ? 'MORTAR STRIKE' : 'INBOUND MORTAR', 'INCOMING FIRE')}</b> — ${who} ${mine ? 'call' : 'calls'} shells onto ${target}.`, true);
+    banner(mine ? 'FIRE MISSION' : 'INCOMING');
+    tone({f0:300, f1:900, dur:.5, type:'triangle', vol:.1});
+    await wait(600);
+    for(let i = 0; i < 3; i++){
+      sfx.rocket();
+      const tx = cx + rnd(-S * .8, S * .8), ty = cy + rnd(-S * .8, S * .8);
+      await FX.rocket(tx + rnd(-160, 160), -70, tx, ty, 420);
+      sfx.boom();
+      FX.shake = Math.max(FX.shake, 14);
+      FX.fire(tx, ty, 22); FX.smoke(tx, ty, 14, .3); FX.blood(tx, ty, 10, 4);
+      stainScorch(tx, ty);
+      FX.ring(tx, ty);
+      await wait(120);
+    }
+  }
+
+  /* the dead, nearest the impact first */
+  const doomed = victims.slice().sort((a, b) => {
+    const ca = ctr(a.sq), cb = ctr(b.sq);
+    return Math.hypot(ca.x - cx, ca.y - cy) - Math.hypot(cb.x - cx, cb.y - cy);
+  });
+  for(const d of doomed){
+    const el = G.pieces.get(d.sq), c = ctr(d.sq);
+    FX.gibs(c.x, c.y, PC_MATTER[d.color], 14);
+    FX.blood(c.x, c.y, 12, 4);
+    FX.fire(c.x, c.y, 6);
+    stainPool(c.x, c.y);
+    if(el){ el.remove(); G.pieces.delete(d.sq); }
+    addMorgue(d.type, d.color);
+    bumpKills();
+    sfx.crunch();
+    await wait(70);
+  }
+  await wait(200);
+  FX.shake = Math.max(FX.shake, 10);
+  const own = victims.filter(v => v.color === striker).length;
+  banner(victims.length ? (product === 'hellfire' ? 'SCORCHED' : 'DIRECT HIT') : 'MISSED');
+  feed(victims.length
+    ? `${pr.icon} <b>${victims.length} dead.</b>${own ? ` ${own} by friendly fire.` : ''}`
+    : `${pr.icon} <b>Nothing there.</b> An expensive hole in the ground.`, true);
+  await wait(800);
+}
+
+function updateWeaponUI(){
+  const live = !!G && !G.over;
+  for(const k of WEAPONS){
+    const b = $('#btn-' + k); if(!b) continue;
+    const a = arm(k), arming = !!ARMING && ARMING.product === k;
+    b.classList.toggle('on', !IOS_APP && !!a.unlocked && live);
+    b.classList.toggle('arming', arming);
+    b.disabled = !arming && !canFire(k);
+    const cnt = $('#' + k + '-count'), small = b.querySelector('small');
+    if(arming){
+      cnt.textContent = '✕';
+      small.textContent = k === 'hellfire' ? 'Tap a quadrant of the board. Tap here to cancel.' : 'Tap the centre square. Tap here to cancel.';
+    } else if(live && !weaponCosts()){
+      cnt.textContent = '∞';
+      small.textContent = G.mode !== 'local' && G.chess.turn() !== G.playerColor
+        ? 'Wait for your turn.' : 'Unlimited against bots. The game becomes unrated.';
+    } else {
+      cnt.textContent = '×' + a.charges;
+      small.textContent = a.charges
+        ? 'Spends one charge and your turn. The match becomes unrated.'
+        : 'No charges left — buy one to fire at a live opponent.';
+    }
+  }
+}
+
 function updateNukeUI(){
   const b = $('#btn-nuke'), n = P.nukes|0, live = !!G && !G.over;
   b.classList.toggle('on', !!P.nukeUnlocked && live);
@@ -2809,9 +3254,11 @@ function updateNukeUI(){
       ? 'Spends one charge against a live opponent. Unrated.'
       : 'No charges left — buy one to nuke a live opponent.';
   }
+  updateWeaponUI();
 }
 
 async function launchNuke(){
+  disarm();
   if(!canNuke()) return;
   const costs = nukeCosts();
   const ok = await confirmDialog('Launch the nuke?',
@@ -2936,6 +3383,7 @@ const CAUSE_TEXT = {
   resign:'by resignation', checkmate:'by checkmate', stalemate:'by stalemate',
   material:'insufficient material', repetition:'threefold repetition',
   fifty:'50-move rule', nuke:'by tactical nuke ☢',
+  hellfire:'by hellfire missile 🚀', mortar:'by mortar strike 💣',
   abandoned:'opponent left the arena',
 };
 
@@ -2943,6 +3391,7 @@ async function endGame(resigned=false, nuked=false){
   if(G.over) return;
   G.over = true;
   gameToken++;
+  disarm();
   stopRelay();
   clearSavedGame();          // finished games shouldn't resume on refresh
   setTurnLamps();
@@ -2960,12 +3409,14 @@ async function endGame(resigned=false, nuked=false){
     nuked = causeCode === 'nuke';
   }
   else if(nuked){ winner = G.nukeWinner; causeCode = 'nuke'; }
+  else if(G.strikeEnd){ winner = G.strikeEnd.winner; causeCode = G.strikeEnd.cause; }
   else if(resigned){ winner = G.mode==='local' ? (ch.turn()==='w'?'b':'w') : (G.playerColor==='w'?'b':'w'); causeCode = 'resign'; }
   else if(ch.in_checkmate()){ winner = ch.turn()==='w' ? 'b' : 'w'; causeCode = 'checkmate'; }
   else if(ch.in_stalemate()) causeCode = 'stalemate';
   else if(ch.insufficient_material()) causeCode = 'material';
   else if(ch.in_threefold_repetition()) causeCode = 'repetition';
   else causeCode = 'fifty';
+  nuked = nuked || causeCode === 'hellfire' || causeCode === 'mortar';   // a king killed by a bought strike: same ending as a nuke
   let cause = CAUSE_TEXT[causeCode] || causeCode;
   if(IOS_APP && nuked) cause = 'opponent ended the match';   // see concludeFromServer
 
@@ -2997,18 +3448,27 @@ async function endGame(resigned=false, nuked=false){
   /* results + rating */
   const goRes = $('#go-result');
   let score = null;  // player score for elo
-  if(nuked && G.mode!=='local'){
+  if((nuked || G.weaponUsed) && G.mode!=='local'){
     /* A bought win never moves a rating, never counts as a game, and never
        adds to the career body count — otherwise unlimited bot nukes would be
        an unlimited kill farm. Note the player on the *receiving* end of a
-       live nuke arrives here too, and they have not won anything. */
+       live nuke arrives here too, and they have not won anything. A match
+       in which a hellfire or mortar was fired is the same, however it ends. */
     const mine = winner === G.playerColor;
-    goRes.className = mine ? 'win' : 'loss';
-    goRes.textContent = mine ? 'VICTORY' : IOS_TXT('ANNIHILATED', 'MATCH ENDED');
-    if(mine) sfx.win(); else sfx.lose();
+    goRes.className = !winner ? 'draw' : mine ? 'win' : 'loss';
+    goRes.textContent = !winner ? 'DRAW' : mine ? 'VICTORY' : IOS_TXT('ANNIHILATED', 'MATCH ENDED');
+    if(winner){ if(mine) sfx.win(); else sfx.lose(); }
     $('#go-rating-row').style.display = 'none';
     $('#go-league').style.display = 'none';
     $('#go-promo').style.display = 'none';
+    /* A nuke, or a strike that killed a king, was finished by the server
+       itself; a weapon match that ended over the board still has to be
+       closed there. Unrated by then: the call records the result and moves
+       nothing. */
+    if(!nuked && G.mode === 'live' && G.matchId){
+      try{ await Backend.finishMatch(G.matchId, winner || 'd', causeCode); }
+      catch(e){ console.error('could not close the match', e); }
+    }
   } else if(G.mode==='local'){
     goRes.className = winner ? 'win' : 'draw';
     goRes.textContent = winner ? (winner==='w'?'WHITE WINS':'BLACK WINS') : 'DRAW';
@@ -3074,8 +3534,8 @@ async function endGame(resigned=false, nuked=false){
     saveProfile();
     refreshHome();
   }
-  $('#go-cause').textContent = cause + (nuked ? ' · unrated' : '');
-  $('#go-kills').textContent = nuked
+  $('#go-cause').textContent = cause + ((nuked || G.weaponUsed) ? ' · unrated' : '');
+  $('#go-kills').textContent = (nuked || G.weaponUsed)
     ? `☠ ${G.kills} pieces ${IOS_TXT('vaporised', 'executed')} — not counted toward your career`
     : `☠ ${G.kills} pieces executed this game`;
   openOv('#ov-go');
@@ -3166,17 +3626,32 @@ function refreshHome(){
   const fb = $('#friends-badge');
   fb.textContent = SOC.incoming.length;
   fb.classList.toggle('on', SOC.incoming.length > 0);
-  const n = P.nukes|0;
-  $('#store-teaser').textContent = P.nukeUnlocked
-    ? `Unlimited bot nukes · ${n} charge${n===1?'':'s'} for live opponents.`
-    : `Tactical nuke — $${NUKE_PRICE_USD}. Unlimited vs bots, one charge vs humans.`;
+  const owned = ['nuke', ...WEAPONS].filter(k => k === 'nuke' ? P.nukeUnlocked : arm(k).unlocked);
+  $('#store-teaser').textContent = owned.length
+    ? 'Armed: ' + owned.map(k => PRODUCTS[k].name).join(', ') + '. Unlimited vs bots, charges vs humans.'
+    : `Nuke $${NUKE_PRICE_USD} · Hellfire $${PRODUCTS.hellfire.price} · Mortar $${PRODUCTS.mortar.price}. Buy once, armed forever vs bots.`;
 }
+let STORE_PLAY = false;          // true once the Play Billing service has been seen
+const PLAY_PRICES = {};          // product -> localised price label from Play
+const PLAY_ITEMS = new Set();    // products Play Console actually lists
 function refreshStore(){
-  const n = P.nukes|0;
-  const used = P.nukesUsed ? ` · ${P.nukesUsed} launched to date` : '';
-  $('#store-owned').innerHTML = P.nukeUnlocked
-    ? `Bot nukes: <b>unlimited</b> · Live charges: <b>${n}</b>${used}`
-    : 'You do not own a warhead yet.';
+  for(const k of ['nuke', ...WEAPONS]){
+    const a = k === 'nuke' ? {charges:P.nukes|0, used:P.nukesUsed|0, unlocked:!!P.nukeUnlocked} : arm(k);
+    const own = $(`[data-owned="${k}"]`);
+    if(own){
+      const used = a.used ? ` · ${a.used} fired to date` : '';
+      own.innerHTML = a.unlocked ? `Vs bots: <b>unlimited</b> · Live charges: <b>${a.charges}</b>${used}` : '';
+    }
+    const b = $(`[data-buy="${k}"]`);
+    if(b && !b.dataset.busy){
+      /* On Android an item is on sale once Play Console lists it; on the web
+         it needs its Payment Link. */
+      const onSale = STORE_PLAY ? PLAY_ITEMS.has(k) : !!PRODUCTS[k].link();
+      b.disabled = !onSale;
+      b.textContent = onSale ? `PURCHASE — ${PLAY_PRICES[k] || '$' + PRODUCTS[k].price}` : 'NOT ON SALE YET';
+    }
+  }
+  $('#store-owned').textContent = '';
 }
 /* ---------------- leaderboard ---------------- */
 let LB_SEQ = 0;   // a load that finishes after a newer one started is dropped
@@ -3526,6 +4001,7 @@ if(IOS_APP){
   $('#foot-links').style.display = '';         // Privacy Policy · Support (· Terms, above)
   $('#acct-privacy').style.display = '';       // App Store 5.1.1(i): policy linked in the app
   $('#btn-store').style.display = 'none';      // no Black Market in the app (IOS_APP)
+  $('#p2w-note').style.display = 'none';       // nor the note about buying weapons
   $('#btn-friends').style.display = 'none';    // demo network = placeholder content
   $('#st-nukes').parentElement.style.display = 'none';
   $('#acct-note').textContent = 'We\'ll email you a link to confirm the address. We never '
@@ -3808,22 +4284,23 @@ $('#acct-go').onclick = async function(){
   }
 };
 
-$('#store-buy').onclick = async function(){
-  if(this.disabled) return;
-  this.disabled = true;     // a second tap during the checks below must not start a second purchase
+async function buyProduct(product, btn){
+  if(btn.disabled || btn.dataset.busy) return;
+  const pr = PRODUCTS[product];
+  btn.disabled = true; btn.dataset.busy = '1';   // a second tap during the checks below must not start a second purchase
   sfx.ui();
 
-  /* Do not sell a $100 item to an account that lives in one browser's
+  /* Do not sell a paid item to an account that lives in one browser's
      storage. The check is deliberately on a *confirmed* email — this project
      has mailer_autoconfirm off, so an address that was typed but never
      confirmed can't sign anyone back in, and treating it as safe would be
      worse than not asking at all. */
   const acct = await refreshAccount();
   if(!acct.secured){
-    this.disabled = false;
+    btn.disabled = false; delete btn.dataset.busy;
     closeOv('#ov-store');
     openAccount('link');
-    toast('Secure your account first — then the warhead is yours for good.');
+    toast(`Secure your account first — then the ${pr.name} is yours for good.`);
     return;
   }
 
@@ -3831,8 +4308,8 @@ $('#store-buy').onclick = async function(){
      the Android build, Stripe everywhere else. */
   const svc = await playBillingService();
 
-  const label = this.textContent;
-  this.textContent = svc ? 'OPENING GOOGLE PLAY…' : 'WAITING FOR PAYMENT…';
+  const label = btn.textContent;
+  btn.textContent = svc ? 'OPENING GOOGLE PLAY…' : 'WAITING FOR PAYMENT…';
   /* Android: deliver any earlier paid-but-undelivered purchase first. While
      one sits in Play's list, Play refuses a new purchase as "already owned". */
   if(svc) await recoverPlayPurchases(svc);
@@ -3841,58 +4318,61 @@ $('#store-buy').onclick = async function(){
     : 'Finish checkout in the tab that just opened. This window will update by itself.';
 
   let res;
-  try{ res = svc ? await Backend.purchaseNukePlay(svc) : await Backend.purchaseNuke(); }
+  try{ res = svc ? await Backend.purchasePlay(svc, product) : await Backend.purchase(product); }
   catch(e){ console.error(e); res = {ok:false, reason:'error'}; }
 
-  this.disabled = false;
-  this.textContent = label;
+  btn.disabled = false; delete btn.dataset.busy;
+  btn.textContent = label;
 
   if(!res.ok){
     /* Never say "declined" on a timeout. The player may well have paid — the
-       warhead is credited by a webhook, and a slow or failed webhook is not a
+       item is credited by a webhook, and a slow or failed webhook is not a
        failed payment. Telling a paying customer their card was declined is
        both false and the fastest way to earn a chargeback. */
-    if(res.reason === 'popup blocked'){
+    if(res.reason === 'unavailable'){
+      storeNotice(`The ${pr.name} is not on sale on the web yet. It is available in the Android app.`);
+      toast('Not on sale on the web yet.');
+      return;
+    } else if(res.reason === 'popup blocked'){
       toast('Your browser blocked the checkout window. Allow pop-ups and try again.');
     } else if(res.reason === 'timeout'){
       storeNotice(
-        'If you completed the payment, it went through — the warhead just has not landed yet. ' +
+        `If you completed the payment, it went through — the ${pr.name} just has not landed yet. ` +
         'It usually appears within a minute; reopen this page to check. If it still is not here, ' +
         'email spindola.software@gmail.com with your receipt and we will sort it out.');
       toast('Payment not confirmed yet — see the note above.');
+      return;
     } else if(res.reason === 'play_pending'){
       /* Google Play: these three come back only after the player paid (or
          started paying), so none of them may claim nothing was charged. They
          return before refreshStore(), which would wipe the note. */
       storeNotice(
         'Google Play is still processing your payment. Once it clears, reopen the Black Market and ' +
-        'the warhead is delivered. If the payment never clears, Google cancels it and nothing is charged.');
+        `the ${pr.name} is delivered. If the payment never clears, Google cancels it and nothing is charged.`);
       toast('Payment still processing — see the note above.');
       return;
     } else if(res.reason === 'play_rejected'){
       storeNotice(
-        'Google Play did not confirm this purchase, so no warhead was delivered. ' +
+        `Google Play did not confirm this purchase, so no ${pr.name} was delivered. ` +
         'If you were charged, Google refunds it automatically.');
       toast('Google Play did not confirm the purchase — see the note above.');
       return;
     } else if(res.reason === 'play_undelivered'){
       storeNotice(
         'Your payment reached Google Play, but delivery has not finished yet. It retries automatically ' +
-        'every time you reopen the Black Market. If it cannot be confirmed, Google refunds the purchase ' +
-        'automatically within 3 days. Questions: ' + SUPPORT_EMAIL);
-      toast('Payment received — delivery not finished yet. See the note above.');
+        'every time you open the Black Market, and the item lands as soon as the server confirms it. ' +
+        'If it is still missing after a day: ' + SUPPORT_EMAIL);
+      toast('Paid, not delivered yet — see the note above.');
       return;
+    } else if(res.reason === 'cancelled'){
+      toast('Purchase cancelled — nothing was charged.');
     } else {
-      toast('Could not start checkout. Nothing was charged.');
+      toast('The purchase could not be started. Nothing was charged.');
     }
     refreshStore(); return;
   }
 
-  /* Google Play only: the server already credited this purchase to a
-     different GoreChess account. It is still consumed, so it does not block
-     the next purchase; the warhead stays where it was credited. */
   if(res.otherAccount){
-    if(typeof res.nukes === 'number'){ P.nukes = res.nukes; P.nukeUnlocked = !!res.unlocked; }
     storeNotice(
       'This Google Play purchase is already on another GoreChess account, so it was not added ' +
       'to this one. Sign in to that account to use it. Questions: ' + SUPPORT_EMAIL);
@@ -3900,12 +4380,13 @@ $('#store-buy').onclick = async function(){
     refreshHome(); updateNukeUI(); return;
   }
 
-  P.nukes = res.nukes;              // the balance the backend believes in
-  P.nukeUnlocked = res.unlocked !== false;
+  if(product === 'nuke'){ P.nukes = res.charges; P.nukeUnlocked = res.unlocked !== false; }
+  else setArm(product, {charges: res.charges, unlocked: res.unlocked !== false});
   sfx.promote();
-  toast('☢️ Armed. Unlimited bot nukes, plus one charge for a live opponent.');
+  toast(`${pr.icon} Armed. Unlimited ${pr.name}s vs bots, plus one charge for a live opponent.`);
   refreshStore(); refreshHome(); updateNukeUI();
-};
+}
+$$('.prod-buy').forEach(b => b.onclick = ()=> buyProduct(b.dataset.buy, b));
 
 /* a persistent line in the store modal, for things a toast is too brief for */
 function storeNotice(msg){
@@ -3927,18 +4408,22 @@ function storeNotice(msg){
    charges the local price, so the store has to say both. The web and iOS
    builds keep the markup as written. */
 async function playStoreLabels(svc){
+  STORE_PLAY = true;
   $('#store-fine').innerHTML = 'Paid through <b>Google Play</b> with your Google account — we never see your ' +
-    'payment details. The warhead is credited once Google confirms the payment, usually within a minute. ' +
+    'payment details. Each item is credited once Google confirms the payment, usually within a minute. ' +
     'Questions or trouble: <b>' + SUPPORT_EMAIL + '</b>';
   try{
-    const [item] = await svc.getDetails([PLAY_SKU]);
-    const pr = item && item.price;
-    if(!pr || !pr.currency || !isFinite(Number(pr.value))) return;
-    const shown = new Intl.NumberFormat(undefined, {style:'currency', currency: pr.currency}).format(Number(pr.value));
-    $('#store-price').firstChild.textContent = shown;
-    $('#store-price small').textContent = pr.currency + ' · UNLOCKS BOT NUKES + 1 CHARGE';
-    if(!$('#store-buy').disabled) $('#store-buy').textContent = 'PURCHASE — ' + shown;   // not mid-purchase
+    const items = await svc.getDetails(Object.keys(PRODUCTS));
+    for(const item of items || []){
+      const pr = item && item.price;
+      if(!item || !PRODUCTS[item.itemId]) continue;
+      PLAY_ITEMS.add(item.itemId);
+      if(!pr || !pr.currency || !isFinite(Number(pr.value))) continue;
+      PLAY_PRICES[item.itemId] = new Intl.NumberFormat(undefined, {style:'currency', currency: pr.currency}).format(Number(pr.value));
+      const p = $(`[data-price="${item.itemId}"]`); if(p) p.textContent = PLAY_PRICES[item.itemId];
+    }
   }catch(e){ console.warn('play price lookup failed', e); }
+  refreshStore();
 }
 
 let playRecovery = null;
@@ -3947,33 +4432,43 @@ function recoverPlayPurchases(svc){
   if(playRecovery) return playRecovery;
   playRecovery = (async ()=>{
     const list = await svc.listPurchases();
-    let landed = null, credited = false;
+    const landed = []; let credited = false;
     for(const p of list || []){
-      if(!p || p.itemId !== PLAY_SKU || !p.purchaseToken || PLAY_INFLIGHT.has(p.purchaseToken)) continue;
+      if(!p || !PRODUCTS[p.itemId] || !p.purchaseToken || PLAY_INFLIGHT.has(p.purchaseToken)) continue;
       PLAY_INFLIGHT.add(p.purchaseToken);
       try{
-        const v = await Backend.playVerify(p.purchaseToken);
+        const v = await Backend.playVerify(p.purchaseToken, p.itemId);
         if(playOutcome(v) !== 'ok'){
           console.warn('play recovery: not delivered yet', v.status, v.body.reason || v.body.code || '');
           continue;
         }
         await playConsume(svc, p.purchaseToken);
         if(v.body.credited) credited = true;
-        if(typeof v.body.nukes === 'number') landed = v.body;
+        if(typeof v.body.charges === 'number') landed.push(v.body);
       }finally{
         PLAY_INFLIGHT.delete(p.purchaseToken);
       }
     }
-    if(landed){
-      P.nukes = landed.nukes;
-      P.nukeUnlocked = !!landed.unlocked;
-      refreshStore(); refreshHome(); updateNukeUI();
-      if(credited) toast('☢️ Your Google Play purchase landed. The warhead is armed.');
+    for(const b of landed){
+      if(b.product === 'nuke'){ P.nukes = b.charges; P.nukeUnlocked = !!b.unlocked; }
+      else if(PRODUCTS[b.product]) setArm(b.product, {charges:b.charges, unlocked:!!b.unlocked});
     }
-    return landed;
+    if(landed.length){
+      refreshStore(); refreshHome(); updateNukeUI();
+      if(credited) toast('Your Google Play purchase landed. You are armed.');
+    }
+    return landed.length ? landed[landed.length - 1] : null;
   })().catch(e=>{ console.warn('play recovery failed', e); return null; })
     .finally(()=>{ playRecovery = null; });
   return playRecovery;
+}
+for(const k of WEAPONS){
+  $('#btn-' + k).onclick = ()=>{
+    if(!G || G.over) return;
+    if(G.busy){ nudgeTurn(); return; }     // something is already dying on screen
+    sfx.ui();
+    armWeapon(k);
+  };
 }
 $('#btn-nuke').onclick = ()=>{
   if(!G || G.over) return;
@@ -4346,6 +4841,15 @@ async function relayTick(){
 }
 
 async function applyRemoteMove(m){
+  /* A strike (007) arrives in the move stream as 'HF:<quadrant>' or
+     'MS:<square>'; it is replayed as theatre, not as a chess move. */
+  const strike = /^(HF|MS):([a-h][1-8])$/.exec(m.uci);
+  if(strike){
+    for(let i = 0; G.busy && i < 80; i++) await wait(100);   // let our own animation finish
+    if(!G || G.over) return;
+    await fireWeapon(strike[1] === 'HF' ? 'hellfire' : 'mortar', strike[2], {remote:true});
+    return;
+  }
   const from = m.uci.slice(0,2), to = m.uci.slice(2,4);
   const promotion = m.uci.length > 4 ? m.uci[4] : undefined;
   /* The server never judged legality, so this is where it gets judged. If
@@ -4542,6 +5046,13 @@ if(typeof Chess === 'undefined'){
     /* After the server's numbers, on purpose: the iOS app never unlocks a
        nuke, whatever the account owns elsewhere (see IOS_APP). */
     if(IOS_APP){ P.nukes = 0; P.nukeUnlocked = false; }
+    /* The weapons (007) live in their own table; same rule as the nuke:
+       the server's balance or nothing, and never in the iOS app. */
+    P.arsenal = {};
+    if(ONLINE && !IOS_APP){
+      try{ P.arsenal = await Backend.arsenal(); }
+      catch(e){ console.warn('arsenal unavailable', e); }
+    }
     P.id = acct.id;
     try{ localStorage.setItem('gorechess_profile', JSON.stringify(P)); }catch(e){}
 
