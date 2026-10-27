@@ -302,7 +302,7 @@
   .lb-row .rk{width:38px; flex:none; text-align:right; font-weight:900; color:var(--dim);}
   .lb-row.top1 .rk{color:var(--gold);} .lb-row.top2 .rk{color:#d6d6d6;} .lb-row.top3 .rk{color:#c98a4b;}
   .lb-row .av{font-size:22px; flex:none;}
-  .lb-row .nm{font-weight:bold; color:var(--bone); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .lb-row .nm{flex:1 1 auto; min-width:4ch; font-weight:bold; color:var(--bone); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
   .lb-row .you{flex:none; color:var(--gold); font-size:12px;}
   .lb-row .lg{flex:none; font-size:16px;}
   .lb-row .rt{margin-left:auto; flex:none; font-weight:900; font-size:17px; color:var(--bone);}
@@ -413,6 +413,12 @@
     #go-result{font-size:32px;}
     #banner .btxt{font-size:40px;}
     .lb-row .rec{display:none;} .lb-row .kl{width:52px;}
+  }
+  /* the name is the row's point: below 360px the kills column goes before it does */
+  @media (max-width:360px){
+    .lb-row{gap:8px; padding:9px 10px;}
+    .lb-row .rk{width:30px;}
+    .lb-row .kl{display:none;}
   }
 
   /* ---------- FRIENDS / SOCIAL ---------- */
