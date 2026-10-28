@@ -373,6 +373,12 @@
   .prod .prod-own{font-size:12px; color:#e6c98c; margin-top:4px;}
   .prod-buy{border-color:#8a5a12; background:linear-gradient(180deg,#6b430a,#31200a); color:#ffe9b0; font-size:14px; padding:10px 14px; flex:none;}
   .prod-buy:disabled{opacity:.55; cursor:default;}
+  /* holiday sale: the list price struck through, the sale price beside it, and a banner */
+  .prod .prod-pr s{color:var(--dim); font-weight:normal; font-size:13px; margin-right:5px;}
+  .store-sale{display:none; margin:10px 0 2px; padding:9px 12px; border-radius:9px; font-weight:bold; letter-spacing:.5px;
+    color:#ffe9b0; background:linear-gradient(180deg,#6b430a,#31200a); border:1px solid #c9922a; box-shadow:0 0 14px rgba(240,180,60,.25);}
+  .store-sale.on{display:block;}
+  .store-sale small{display:block; font-weight:normal; letter-spacing:0; color:#e6c98c; margin-top:2px; font-size:12px;}
   @media (max-width:600px){ .prod{flex-wrap:wrap;} .prod-buy{width:100%;} }
 
   /* ---------- ACCOUNT SECURITY ---------- */
@@ -757,6 +763,7 @@
   <div class="modal store-modal">
     <h2>☢️ BLACK MARKET</h2>
     <p class="sub">Every purchase is one charge against a real opponent. The nuke is unlimited against bots; the hellfire and the mortar come with five bot uses. Any match a weapon is fired in counts for half points.</p>
+    <div class="store-sale" id="store-sale"></div>
     <div class="acct-warn" id="store-warn">
       <b>⚠ Secure your account first</b>
       Right now this account exists only in this browser. Clearing your history,
@@ -1201,6 +1208,96 @@ const PRODUCTS = {
 };
 const WEAPONS = ['hellfire', 'mortar'];
 
+/* --- Holiday sales ---------------------------------------------------------
+   A discount tier is just another price. Each (item, tier) pair is its own
+   Stripe Payment Link and its own Play one-time product, both priced at the
+   list price less the tier, and both credit the BASE item: the link carries
+   the same product=<item> metadata as the full-price link (the webhook reads
+   it first), and play-verify strips the tier suffix before crediting. So the
+   server never hears about holidays; the client only decides which link or
+   SKU to open, from the player's local calendar day.
+
+   An empty link means that tier is not on sale on the web and the store
+   charges list price that day; on Android a tier is on sale once Play
+   Console lists its product. The links are public, like the full-price ones. */
+const SALE_TIERS = [75, 50, 25];
+const SALE_PAY_LINKS = {
+  nuke:     {75:'https://buy.stripe.com/eVq28r7SgfjddSOftc67S0b',    // $25  plink_1UVfxSFdpx7emFYwzk7MwryT
+             50:'https://buy.stripe.com/9B6dR9egEb2X3ea2Gq67S0c',    // $50  plink_1UVfyqFdpx7emFYwKSfPZxlS
+             25:'https://buy.stripe.com/8x2dR94G4fjdg0W0yi67S0d'},   // $75  plink_1UVg0GFdpx7emFYwx9IJUFxa
+  hellfire: {75:'https://buy.stripe.com/aFa14ndcAef98yubcW67S05',    // $10  plink_1UVfkcFdpx7emFYwLmpHJiKB
+             50:'https://buy.stripe.com/cNidR90pO5ID7uqbcW67S06',    // $20  plink_1UVfnTFdpx7emFYwec1MVO6l
+             25:'https://buy.stripe.com/6oUfZh3C08UP3ea4Oy67S07'},   // $30  plink_1UVfpeFdpx7emFYwZ6zS2AL3
+  mortar:   {75:'https://buy.stripe.com/3cI28rdcAef95mi0yi67S08',    // $3.75  plink_1UVfrxFdpx7emFYwm6n87M2M
+             50:'https://buy.stripe.com/6oU6oH3C06MH7uqdl467S09',    // $7.50  plink_1UVftgFdpx7emFYwbaklHndh
+             25:'https://buy.stripe.com/aFa3cv6Oc1sn9Cych067S0a'},   // $11.25 plink_1UVfvzFdpx7emFYwzytjV2jq
+};
+/* Play product ids may not contain hyphens (and purchase option ids may not
+   contain underscores), hence `nuke_75`. play-verify knows the same ids. */
+const saleSku     = (product, pct) => `${product}_${pct}`;
+const baseProduct = sku => String(sku).replace(/_\d+$/, '');      // 'hellfire_50' -> 'hellfire'
+const salePrice   = (product, pct) => Math.round(PRODUCTS[product].price * (100 - pct)) / 100;
+const fmtUsd      = n => '$' + (Number.isInteger(n) ? n : n.toFixed(2));
+const ALL_SKUS    = Object.keys(PRODUCTS).flatMap(p => [p, ...SALE_TIERS.map(t => saleSku(p, t))]);
+
+/* Easter Sunday (Gregorian), Meeus/Jones/Butcher: [month (0-based), day]. */
+function easterSunday(y){
+  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4,
+        f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3),
+        h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4,
+        l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451),
+        month = Math.floor((h + l - 7 * m + 114) / 31), day = ((h + l - 7 * m + 114) % 31) + 1;
+  return [month - 1, day];
+}
+/* Day of the month of the n-th `weekday` (0 = Sunday) of `month` (0-based);
+   n = -1 is the last one. */
+function nthWeekday(y, month, weekday, n){
+  if(n > 0) return 1 + (weekday - new Date(y, month, 1).getDay() + 7) % 7 + (n - 1) * 7;
+  const last = new Date(y, month + 1, 0);
+  return last.getDate() - (last.getDay() - weekday + 7) % 7;
+}
+/* The sale calendar as Rafael set it on 2026-10-27. Nothing else is on it:
+   Juneteenth, Hanukkah and Kwanzaa were left out on purpose. */
+const HOLIDAYS = [
+  ['Veterans Day',       75, y => [10, 11]],
+  ['Memorial Day',       75, y => [4, nthWeekday(y, 4, 1, -1)]],     // last Monday of May
+  ['Christmas',          50, y => [11, 25]],
+  ['Thanksgiving',       50, y => [10, nthWeekday(y, 10, 4, 4)]],    // 4th Thursday of November
+  ['Independence Day',   50, y => [6, 4]],
+  ["New Year's Day",     25, y => [0, 1]],
+  ["Valentine's Day",    25, y => [1, 14]],
+  ["St. Patrick's Day",  25, y => [2, 17]],
+  ['Easter',             25, easterSunday],
+  ["Mother's Day",       25, y => [4, nthWeekday(y, 4, 0, 2)]],      // 2nd Sunday of May
+  ["Father's Day",       25, y => [5, nthWeekday(y, 5, 0, 3)]],      // 3rd Sunday of June
+  ['Labor Day',          25, y => [8, nthWeekday(y, 8, 1, 1)]],      // 1st Monday of September
+  ['Halloween',          25, y => [9, 31]],
+];
+/* {name, pct} when `date` (default now, the player's local day) is a sale
+   day, else null. */
+function holidayDiscount(date){
+  const d = date || new Date();
+  const y = d.getFullYear(), m = d.getMonth(), day = d.getDate();
+  for(const [name, pct, when] of HOLIDAYS){
+    const [hm, hd] = when(y);
+    if(hm === m && hd === day) return {name, pct};
+  }
+  return null;
+}
+/* What the store charges for `product` today and through which link or SKU:
+   the holiday tier when one is on and this build can sell it (its Play
+   product is listed / its Payment Link exists), else list price. */
+function storeOffer(product, play){
+  const pr = PRODUCTS[product], h = holidayDiscount();
+  if(h){
+    const sku = saleSku(product, h.pct), link = SALE_PAY_LINKS[product][h.pct];
+    if(play ? PLAY_ITEMS.has(sku) : !!link){
+      return {product, sku, link, price: salePrice(product, h.pct), pct: h.pct, holiday: h.name};
+    }
+  }
+  return {product, sku: product, link: pr.link(), price: pr.price, pct: 0, holiday: null};
+}
+
 /* --- Google Play Billing -------------------------------------------------
    Play requires digital goods sold *inside the Android app* to go through
    Play Billing. The website may keep Stripe: the policy governs the app, not
@@ -1369,7 +1466,7 @@ function makeSupabaseBackend(){
        money changed hands, so nothing is credited locally. */
     async purchase(product){
       const pr = PRODUCTS[product];
-      const link = pr && pr.link();
+      const link = pr && storeOffer(product, false).link;   // the holiday tier's link on a sale day, else list price
       if(!link) return {ok:false, product, charges:0, reason:'unavailable'};
       const {data:{user}} = await sb.auth.getUser();
       if(!user) return {ok:false, product, charges:0};
@@ -1410,8 +1507,17 @@ function makeSupabaseBackend(){
       const pr = PRODUCTS[product];
       const held = product === 'nuke' ? P.nukes|0 : arm(product).charges;   // failures report the balance we already had
 
+      /* On a sale day the tier's own Play product is asked for first (it is
+         listed at the sale price); if Play does not list it, the full-price
+         one. Google sees the tier's product id; what gets credited is the
+         base item (play-verify strips the suffix). */
+      const h = holidayDiscount();
+      let sku = h ? saleSku(product, h.pct) : product;
       let details;
-      try{ details = await svc.getDetails([product]); }
+      try{
+        details = await svc.getDetails([sku]);
+        if((!details || !details.length) && sku !== product){ sku = product; details = await svc.getDetails([sku]); }
+      }
       catch(e){ console.error('getDetails failed', e); return {ok:false, product, charges:held, reason:'error'}; }
       if(!details || !details.length) return {ok:false, product, charges:held, reason:'no such product'};
 
@@ -1422,7 +1528,7 @@ function makeSupabaseBackend(){
       const price = item.price && item.price.currency
         ? {currency: item.price.currency, value: item.price.value} : {currency:'USD', value:'0'};
       const req = new PaymentRequest(
-        [{supportedMethods: PLAY_BILLING, data:{sku: product}}],
+        [{supportedMethods: PLAY_BILLING, data:{sku}}],
         {total:{label: item.title || pr.name, amount: price}});
 
       let resp;
@@ -1433,7 +1539,7 @@ function makeSupabaseBackend(){
            cancel and must not be told nothing was charged. */
         try{
           const owned = await svc.listPurchases();
-          if((owned || []).some(p => p && p.itemId === product)) return {ok:false, product, charges:held, reason:'play_undelivered'};
+          if((owned || []).some(p => p && baseProduct(p.itemId) === product)) return {ok:false, product, charges:held, reason:'play_undelivered'};
         }catch(e2){ console.warn('listPurchases failed', e2); }
         return {ok:false, product, charges:held, reason:'cancelled'};
       }
@@ -1448,7 +1554,7 @@ function makeSupabaseBackend(){
 
       PLAY_INFLIGHT.add(purchaseToken);
       try{
-        const v = await B.playVerify(purchaseToken, product);
+        const v = await B.playVerify(purchaseToken, sku);   // the Play product id the token belongs to
         const outcome = playOutcome(v);
         if(outcome === 'ok'){
           try{ await resp.complete('success'); }catch(e){}
@@ -3603,14 +3709,20 @@ function refreshHome(){
   fb.textContent = SOC.incoming.length;
   fb.classList.toggle('on', SOC.incoming.length > 0);
   const owned = ['nuke', ...WEAPONS].filter(k => k === 'nuke' ? P.nukeUnlocked : arm(k).unlocked);
+  const h = holidayDiscount();
+  const sale = h && `${h.name}: ${h.pct}% off today`;
   $('#store-teaser').textContent = owned.length
-    ? 'Armed: ' + owned.map(k => PRODUCTS[k].name).join(', ') + '. Weapon games count for half points.'
-    : `Nuke $${NUKE_PRICE_USD} · Hellfire $${PRODUCTS.hellfire.price} · Mortar $${PRODUCTS.mortar.price}. Half points when used.`;
+    ? 'Armed: ' + owned.map(k => PRODUCTS[k].name).join(', ') + '. ' + (sale ? sale + '.' : 'Weapon games count for half points.')
+    : sale
+      ? `${sale} — Nuke ${fmtUsd(salePrice('nuke', h.pct))} · Hellfire ${fmtUsd(salePrice('hellfire', h.pct))} · Mortar ${fmtUsd(salePrice('mortar', h.pct))}.`
+      : `Nuke $${NUKE_PRICE_USD} · Hellfire $${PRODUCTS.hellfire.price} · Mortar $${PRODUCTS.mortar.price}. Half points when used.`;
 }
 let STORE_PLAY = false;          // true once the Play Billing service has been seen
 const PLAY_PRICES = {};          // product -> localised price label from Play
 const PLAY_ITEMS = new Set();    // products Play Console actually lists
 function refreshStore(){
+  const h = holidayDiscount();
+  let saleOn = false;   // a tier this build can actually sell today
   for(const k of ['nuke', ...WEAPONS]){
     const a = k === 'nuke' ? {charges:P.nukes|0, used:P.nukesUsed|0, unlocked:!!P.nukeUnlocked} : arm(k);
     const own = $(`[data-owned="${k}"]`);
@@ -3620,15 +3732,25 @@ function refreshStore(){
         : k === 'nuke' ? `Vs bots: <b>unlimited</b> · Live charges: <b>${a.charges}</b>${used}`
         : `Bot uses: <b>${a.botUses}</b> · Live charges: <b>${a.charges}</b>${used}`;
     }
+    /* On Android an item is on sale once Play Console lists it; on the web
+       it needs its Payment Link. A holiday tier counts only when this build
+       can sell that tier (storeOffer), so the price shown is the price charged. */
+    const offer = storeOffer(k, STORE_PLAY);
+    const onSale = STORE_PLAY ? PLAY_ITEMS.has(offer.sku) : !!offer.link;
+    const list = PLAY_PRICES[k] || '$' + PRODUCTS[k].price;
+    const label = offer.pct ? (PLAY_PRICES[offer.sku] || fmtUsd(offer.price)) : list;
+    const pr = $(`[data-price="${k}"]`);
+    if(pr) pr.innerHTML = offer.pct ? `<s>${list}</s>${label}` : list;
+    if(offer.pct) saleOn = true;
     const b = $(`[data-buy="${k}"]`);
     if(b && !b.dataset.busy){
-      /* On Android an item is on sale once Play Console lists it; on the web
-         it needs its Payment Link. */
-      const onSale = STORE_PLAY ? PLAY_ITEMS.has(k) : !!PRODUCTS[k].link();
       b.disabled = !onSale;
-      b.textContent = onSale ? `PURCHASE — ${PLAY_PRICES[k] || '$' + PRODUCTS[k].price}` : 'NOT ON SALE YET';
+      b.textContent = onSale ? `PURCHASE — ${label}` : 'NOT ON SALE YET';
     }
   }
+  const banner = $('#store-sale');
+  banner.classList.toggle('on', saleOn);
+  banner.innerHTML = saleOn ? `🎉 ${h.name}: ${h.pct}% off today<small>Today only — list prices are back tomorrow.</small>` : '';
   $('#store-owned').textContent = '';
 }
 /* ---------------- leaderboard ---------------- */
@@ -4392,14 +4514,13 @@ async function playStoreLabels(svc){
     'payment details. Each item is credited once Google confirms the payment, usually within a minute. ' +
     'Questions or trouble: <b>' + SUPPORT_EMAIL + '</b>';
   try{
-    const items = await svc.getDetails(Object.keys(PRODUCTS));
+    const items = await svc.getDetails(ALL_SKUS);   // the three items and their holiday tiers
     for(const item of items || []){
       const pr = item && item.price;
-      if(!item || !PRODUCTS[item.itemId]) continue;
+      if(!item || !PRODUCTS[baseProduct(item.itemId)]) continue;
       PLAY_ITEMS.add(item.itemId);
       if(!pr || !pr.currency || !isFinite(Number(pr.value))) continue;
       PLAY_PRICES[item.itemId] = new Intl.NumberFormat(undefined, {style:'currency', currency: pr.currency}).format(Number(pr.value));
-      const p = $(`[data-price="${item.itemId}"]`); if(p) p.textContent = PLAY_PRICES[item.itemId];
     }
   }catch(e){ console.warn('play price lookup failed', e); }
   refreshStore();
@@ -4413,7 +4534,7 @@ function recoverPlayPurchases(svc){
     const list = await svc.listPurchases();
     const landed = []; let credited = false;
     for(const p of list || []){
-      if(!p || !PRODUCTS[p.itemId] || !p.purchaseToken || PLAY_INFLIGHT.has(p.purchaseToken)) continue;
+      if(!p || !PRODUCTS[baseProduct(p.itemId)] || !p.purchaseToken || PLAY_INFLIGHT.has(p.purchaseToken)) continue;
       PLAY_INFLIGHT.add(p.purchaseToken);
       try{
         const v = await Backend.playVerify(p.purchaseToken, p.itemId);
