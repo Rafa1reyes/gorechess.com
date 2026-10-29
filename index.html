@@ -47,6 +47,13 @@
   @keyframes drip{0%{height:0;opacity:0}15%{opacity:1}70%{height:46px;opacity:1}100%{height:56px;opacity:0}}
   .tagline{color:var(--dim); font-style:italic; font-size:17px; margin-top:2px;}
   .tagline b{color:var(--blood2);}
+  /* Warriors on the battlefield: live head-count from Realtime presence. Hidden
+     until the first sync arrives, and again if the socket drops. */
+  .warriors{display:flex; align-items:center; justify-content:center; gap:8px; margin:12px auto 0; font-size:14px; color:var(--dim); letter-spacing:.4px;}
+  .warriors[hidden]{display:none;}
+  .warriors .dot{width:9px; height:9px; border-radius:50%; background:#2ecc71; box-shadow:0 0 8px #2ecc71; animation:pulse 2s infinite;}
+  .warriors b{color:var(--ink); font-size:17px; font-weight:800; margin:0 2px;}
+  .warriors .wb{color:var(--blood2);}
 
   .me-card{display:flex; align-items:center; justify-content:center; gap:14px; margin:20px auto 6px; background:var(--panel); border:1px solid #3a2830; border-radius:14px; padding:12px 20px; width:fit-content;}
   .lg-badge{font-size:34px; filter:drop-shadow(0 2px 4px #000);}
@@ -531,6 +538,7 @@
     <div class="drip" style="left:47%; animation-delay:1.4s"></div>
     <div class="drip" style="left:69%; animation-delay:2.2s"></div>
     <p class="tagline">Every capture is an <b>execution</b>.</p>
+    <div class="warriors" id="warriors" hidden title="Players with GoreChess open right now"><span class="dot"></span>Warriors on the battlefield: <b id="warriors-n">—</b><span class="wb" id="warriors-b"></span></div>
   </div>
 
   <div class="me-card">
@@ -1882,6 +1890,58 @@ function liveOutcome(d){
 
 let Backend = Local;
 let ONLINE  = false;      // true once the Supabase backend is actually signed in
+
+/* --- Warriors on the battlefield ----------------------------------------
+   The home page's live head-count. Every open tab joins one Realtime
+   presence channel and announces whether it is in a match; each tab counts
+   what it sees. No table, no polling, no writes: the number lives only in
+   the socket and vanishes with the tab, so it costs nothing to keep and
+   nothing to clean up. Keyed by player id, so one player with three tabs
+   open is one warrior. Offline (the Local backend) there is no channel and
+   the line stays hidden rather than showing a made-up number. */
+let presence = null;
+function presenceState(){
+  const playing = !!(G && !G.over && G.mode !== 'local' && $('#scr-game').classList.contains('on'));
+  return {playing};
+}
+function renderWarriors(){
+  const el = $('#warriors'); if(!el) return;
+  if(!presence || presence.count == null){ el.hidden = true; return; }
+  el.hidden = false;
+  $('#warriors-n').textContent = presence.count;
+  $('#warriors-b').textContent = presence.playing ? ` · ${presence.playing} in battle` : '';
+}
+function startPresence(){
+  if(presence || !ONLINE || !Backend.sb || !P.id) return;
+  const ch = Backend.sb.channel('gc:battlefield', {config:{presence:{key:P.id}}});
+  presence = {ch, count:null, playing:0, last:null};
+  const tally = ()=>{
+    const st = ch.presenceState();
+    let n = 0, b = 0;
+    for(const k in st){ n++; if(st[k].some(m => m.playing)) b++; }
+    presence.count = n; presence.playing = b;
+    renderWarriors();
+  };
+  ch.on('presence', {event:'sync'}, tally)
+    .subscribe(status => {
+      if(status === 'SUBSCRIBED') presenceSync(true);
+      else if(status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED'){
+        presence.count = null; presence.last = null; renderWarriors();
+      }
+    });
+  /* a match that ends keeps the game screen up, so the "in battle" flag is
+     re-checked on a slow tick as well as on every screen change */
+  setInterval(()=> presenceSync(), 15000);
+}
+/* Re-announce this tab's state when it changed (or `force`, after a join). */
+async function presenceSync(force){
+  if(!presence) return;
+  const s = presenceState();
+  if(!force && presence.last && presence.last.playing === s.playing) return;
+  presence.last = s;
+  try{ await presence.ch.track(s); }catch(e){ console.warn('presence track failed', e); }
+}
+
 function leagueIdx(p){
   let idx = 0;
   LEAGUES.forEach((l,i)=>{ if(p.rating >= l.minR && p.games >= l.minG) idx = i; });
@@ -1916,7 +1976,7 @@ function anim(ms, fn, ease=easeOut){
     })(performance.now());
   });
 }
-function showScreen(id){ $$('.scr').forEach(s=>s.classList.remove('on')); $(id).classList.add('on'); }
+function showScreen(id){ $$('.scr').forEach(s=>s.classList.remove('on')); $(id).classList.add('on'); presenceSync(); }
 function openOv(id){ $(id).classList.add('on'); }
 function closeOv(id){ $(id).classList.remove('on'); }
 
@@ -5175,6 +5235,7 @@ if(typeof Chess === 'undefined'){
 
     refreshHome();
     updateNukeUI();
+    startPresence();                          // "Warriors on the battlefield" on the home page
     if(!P.username) openIdentity(true);       // no handle yet — required before play
     if(!ONLINE) toast('Offline — playing locally. Progress won\'t sync.');
   })();
